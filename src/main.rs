@@ -89,6 +89,9 @@ struct FileHitHandler {
     read_size: usize,
 }
 
+const DEFAULT_READ_SIZE: usize = 128*1024;
+static READ_SIZE: OnceCell<usize> = OnceCell::new();
+
 impl FileHitHandler {
     fn new(fp: File) -> FileHitHandler {
         Self {
@@ -101,9 +104,6 @@ impl FileHitHandler {
         Box::new(Self::new(fp))
     }
 }
-
-const DEFAULT_READ_SIZE: usize = 128*1024;
-static READ_SIZE: OnceCell<usize> = OnceCell::new();
 
 #[async_trait]
 impl HandleHit for FileHitHandler {
@@ -657,7 +657,7 @@ struct Args {
     #[arg(
         short = 's',
         long = "read-size",
-        default_value_t = DEFAULT_READ_SIZE,
+        default_value = "128k",
         value_parser = SizeParser,
     )]
     read_size: usize,
