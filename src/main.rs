@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use clap::builder::TypedValueParser;
-use clap::Parser;
 use core::any::Any;
 use log::{error, LevelFilter, Metadata, Record};
 use once_cell::sync::OnceCell;
@@ -16,7 +14,7 @@ use pingora::{
     http::ResponseHeader,
     prelude::*,
 };
-use std::sync::atomic::Ordering;
+use std::{str::FromStr, sync::atomic::Ordering};
 use std::time::{Duration, SystemTime};
 use std::{
     ffi::{OsStr, OsString},
@@ -33,9 +31,13 @@ use std::{io, str};
 
 struct SimpleLogger {}
 
+const DEFAULT_LOG_LEVEL: LevelFilter = LevelFilter::Info;
+
 impl SimpleLogger {
     fn install(&'static self) -> Result<(), log::SetLoggerError> {
-        log::set_logger(self)
+        let result = log::set_logger(self);
+        self.set_level(DEFAULT_LOG_LEVEL);
+        result
     }
 
     fn set_level(&self, level: LevelFilter) {
@@ -626,85 +628,70 @@ impl ProxyHttp for PyPI {
     }
 }
 
-#[derive(Clone)]
-struct SizeParser;
+#[derive(Debug)]
+struct Unit(usize);
 
-impl TypedValueParser for SizeParser {
-    type Value = usize;
+impl FromStr for Unit {
+    type Err = parse_size::Error;
 
-    fn parse_ref(
-        &self,
-        _cmd: &clap::Command,
-        _arg: Option<&clap::Arg>,
-        value: &OsStr,
-    ) -> Result<Self::Value, clap::Error> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         parse_size::Config::new()
             .with_binary()
-            .parse_size(value.as_encoded_bytes())
-            .map(|v| v as usize)
-            .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
+            .parse_size(s).map(|v| Self(v as usize))
     }
 }
 
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    /// Bind address
-    #[arg(
-        short = 'a',
-        long = "address",
-        default_value = "localhost:6188",
-    )]
-    address: String,
+mod flags {
+    use super::*;
 
-    /// Set the log level
-    #[arg(
-        short = 'l',
-        long = "log-level",
-        default_value = "info",
-        value_parser = clap::builder::PossibleValuesParser::new(
-            ["off", "trace", "debug", "info", "warn", "error"]
-        ).map(|s| s.parse::<LevelFilter>().unwrap()),
-    )]
-    log_level: LevelFilter,
+    xflags::xflags! {
+        cmd toplevel {
+            /// Bind address
+            optional -a,--address address: String
+            /// Path where cached files are stored
+            optional -p,--cache-path cache_path: PathBuf
+            /// Path where cached files are stored
+            optional -s,--read-size read_size: Unit
+            /// Set the log level
+            optional -l,--log-level log_level: LevelFilter
+        }
+    }
 
-    /// Chunk size for reading cached files
-    #[arg(
-        short = 's',
-        long = "read-size",
-        default_value = "128k",
-        value_parser = SizeParser,
-    )]
-    read_size: usize,
-
-    /// Path where cached files are stored
-    #[arg(
-        short = 'p',
-        long = "cache-path",
-        default_value = "cache",
-    )]
-    cache_path: PathBuf,
+    impl Toplevel {
+        pub fn get_address(&self) -> &str {
+            self.address.as_deref().unwrap_or("localhost:6188")
+        }
+        pub fn get_cache_path(&self) -> PathBuf {
+            self.cache_path.clone().unwrap_or_else(|| PathBuf::from("cache"))
+        }
+        pub fn get_read_size(&self) -> usize {
+            self.read_size.as_ref().map_or(DEFAULT_READ_SIZE, |v| v.0)
+        }
+        pub fn get_log_level(&self) -> LevelFilter {
+            self.log_level.unwrap_or(DEFAULT_LOG_LEVEL)
+        }
+    }
 }
 
 fn main() {
     LOGGER.install().unwrap();
 
-    let args = Args::parse();
+    let flags = flags::Toplevel::from_env_or_exit();
 
-    LOGGER.set_level(args.log_level);
+    LOGGER.set_level(flags.get_log_level());
 
-    STORAGE
-        .set(FileStorage::new(args.cache_path).unwrap())
-        .unwrap();
+    error!("{:?}", &flags);
 
-    READ_SIZE.set(args.read_size).unwrap();
+    STORAGE.set(FileStorage::new(flags.get_cache_path()).unwrap()).unwrap();
+
+    READ_SIZE.set(flags.get_read_size()).unwrap();
 
     let mut my_server = Server::new(None).unwrap();
     my_server.bootstrap();
 
     let inner = PyPI::new();
     let mut pypi = http_proxy_service(&my_server.configuration, inner);
-    pypi.add_tcp(&args.address);
+    pypi.add_tcp(flags.get_address());
 
     my_server.add_service(pypi);
     my_server.run_forever();
