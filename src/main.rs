@@ -13,7 +13,7 @@ use pingora::{
     http::ResponseHeader,
     prelude::*,
 };
-use std::str;
+use std::{io, str};
 use std::time::{Duration, SystemTime};
 use std::{
     ffi::{OsStr, OsString},
@@ -85,26 +85,25 @@ fn path_to_str(path: impl Into<OsString>) -> String {
 }
 
 struct FileHitHandler {
-    path: PathBuf,
     fp: File,
-    written: usize,
-    finished: AtomicBool,
+    read_size: usize,
 }
 
 impl FileHitHandler {
-    fn new(path: PathBuf, fp: File) -> FileHitHandler {
+    fn new(fp: File) -> FileHitHandler {
         Self {
-            path: path,
             fp: fp,
-            written: 0,
-            finished: false.into(),
+            read_size: *READ_SIZE.get().unwrap_or(&DEFAULT_READ_SIZE),
         }
     }
 
-    fn new_box(path: PathBuf, fp: File) -> Box<FileHitHandler> {
-        Box::new(Self::new(path, fp))
+    fn new_box(fp: File) -> Box<FileHitHandler> {
+        Box::new(Self::new(fp))
     }
 }
+
+const DEFAULT_READ_SIZE: usize = 32*1024;
+static READ_SIZE: OnceCell<usize> = OnceCell::new();
 
 #[async_trait]
 impl HandleHit for FileHitHandler {
@@ -112,7 +111,7 @@ impl HandleHit for FileHitHandler {
     ///
     /// Return `None` when no more body to read.
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
-        let mut buf = vec![0; 4096];
+        let mut buf = vec![0; self.read_size];
         match self.fp.read(&mut buf) {
             Ok(n) => {
                 if n > 0 {
@@ -133,12 +132,6 @@ impl HandleHit for FileHitHandler {
         _key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<()> {
-        self.finished.store(true, Ordering::Relaxed);
-        /*debug!(
-            "HandleHit finish called {}, trace {:?}",
-            self.path_str(),
-            trace
-        );*/
         Ok(())
     }
 
@@ -233,16 +226,23 @@ impl Drop for FileMissHandler {
 }
 
 #[derive(Debug)]
-struct FileStorage<'a> {
-    path: &'a str,
+struct FileStorage {
+    path: PathBuf,
 }
 
-impl FileStorage<'_> {
+impl FileStorage {
+    fn new(path: PathBuf) -> io::Result<Self> {
+        if !path.exists() {
+            fs::create_dir_all(&path)?;
+        }
+        Ok(Self{ path: path })
+    }
+
     fn data_path(&'static self, key: &CacheKey) -> PathBuf {
-        [self.path, &key.primary()].iter().collect()
+        self.path.join(&key.primary())
     }
     fn meta_path(&'static self, key: &CacheKey) -> PathBuf {
-        [self.path, &(key.primary() + ".meta")].iter().collect()
+        self.path.join(key.primary() + ".meta")
     }
 }
 
@@ -318,7 +318,7 @@ fn load_cachemeta(path: &Path) -> Result<CacheMeta> {
 }
 
 #[async_trait]
-impl Storage for FileStorage<'_> {
+impl Storage for FileStorage {
     /// Lookup the storage for the given [CacheKey]
     async fn lookup(
         &'static self,
@@ -333,7 +333,7 @@ impl Storage for FileStorage<'_> {
 
         match File::open(&data_path) {
             Ok(fp) => {
-                return Ok(Some((meta, FileHitHandler::new_box(data_path, fp))));
+                return Ok(Some((meta, FileHitHandler::new_box(fp))));
                 /*match fp.metadata() {
                     Ok(attr) => {
                         let mtime = attr.modified().unwrap();
@@ -629,9 +629,19 @@ struct Args {
         long = "log-level",
         default_value = "info",
         value_parser = clap::builder::PossibleValuesParser::new(["off", "trace", "debug", "info", "warn", "error"])
-        .map(|s| s.parse::<LevelFilter>().unwrap())
+        .map(|s| s.parse::<LevelFilter>().unwrap()),
     )]
     log_level: LevelFilter,
+
+    #[arg(default_value_t = DEFAULT_READ_SIZE)]
+    read_size: usize,
+
+    #[arg(
+        short = 'p',
+        long = "cache-path",
+        default_value = "cache",
+    )]
+    cache_path: PathBuf,
 }
 
 fn main() {
@@ -641,23 +651,15 @@ fn main() {
 
     LOGGER.set_level(args.log_level);
 
+    STORAGE.set(FileStorage::new(args.cache_path).unwrap()).unwrap();
+
     let mut my_server = Server::new(None).unwrap();
     my_server.bootstrap();
-
-    let path = Path::new("./cache");
-    if !path.exists() {
-        fs::create_dir_all(path).unwrap();
-    }
-
-    STORAGE
-        .set(FileStorage {
-            path: path.to_str().unwrap(),
-        })
-        .unwrap();
 
     let inner = PyPI::new();
     let mut pypi = http_proxy_service(&my_server.configuration, inner);
     pypi.add_tcp("0.0.0.0:6188");
+
     my_server.add_service(pypi);
     my_server.run_forever();
 }
