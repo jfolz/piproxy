@@ -660,7 +660,7 @@ struct Args {
     )]
     log_level: LevelFilter,
 
-    /// Chunk size for reading from cache
+    /// Chunk size for reading cached files
     #[arg(
         short = 's',
         long = "read-size",
@@ -669,7 +669,7 @@ struct Args {
     )]
     read_size: usize,
 
-    /// Path to store cached files
+    /// Path where cached files are stored
     #[arg(short = 'p', long = "cache-path", default_value = "cache")]
     cache_path: PathBuf,
 }
