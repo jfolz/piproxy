@@ -649,6 +649,14 @@ impl TypedValueParser for SizeParser {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Bind address
+    #[arg(
+        short = 'a',
+        long = "address",
+        default_value = "localhost:6188",
+    )]
+    address: String,
+
     /// Set the log level
     #[arg(
         short = 'l',
@@ -670,7 +678,11 @@ struct Args {
     read_size: usize,
 
     /// Path where cached files are stored
-    #[arg(short = 'p', long = "cache-path", default_value = "cache")]
+    #[arg(
+        short = 'p',
+        long = "cache-path",
+        default_value = "cache",
+    )]
     cache_path: PathBuf,
 }
 
@@ -692,7 +704,7 @@ fn main() {
 
     let inner = PyPI::new();
     let mut pypi = http_proxy_service(&my_server.configuration, inner);
-    pypi.add_tcp("0.0.0.0:6188");
+    pypi.add_tcp(&args.address);
 
     my_server.add_service(pypi);
     my_server.run_forever();
