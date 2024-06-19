@@ -102,7 +102,7 @@ impl FileHitHandler {
     }
 }
 
-const DEFAULT_READ_SIZE: usize = 32*1024;
+const DEFAULT_READ_SIZE: usize = 128*1024;
 static READ_SIZE: OnceCell<usize> = OnceCell::new();
 
 #[async_trait]
@@ -620,10 +620,30 @@ impl ProxyHttp for PyPI {
     }
 }
 
+#[derive(Clone)]
+struct SizeParser;
+
+impl TypedValueParser for SizeParser {
+    type Value = usize;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+            parse_size::Config::new().with_binary()
+            .parse_size(value.as_encoded_bytes())
+            .map(|v| v as usize)
+            .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
+    }
+
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Name of the person to greet
+    /// Set the log level
     #[arg(
         short = 'l',
         long = "log-level",
@@ -633,9 +653,16 @@ struct Args {
     )]
     log_level: LevelFilter,
 
-    #[arg(default_value_t = DEFAULT_READ_SIZE)]
+    /// Chunk size for reading from cache
+    #[arg(
+        short = 's',
+        long = "read-size",
+        default_value_t = DEFAULT_READ_SIZE,
+        value_parser = SizeParser,
+    )]
     read_size: usize,
 
+    /// Path to store cached files
     #[arg(
         short = 'p',
         long = "cache-path",
@@ -653,6 +680,8 @@ fn main() {
 
     STORAGE.set(FileStorage::new(args.cache_path).unwrap()).unwrap();
 
+    READ_SIZE.set(args.read_size).unwrap();
+
     let mut my_server = Server::new(None).unwrap();
     my_server.bootstrap();
 
@@ -669,7 +698,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exploration() {
+    fn test_find_in_slice() {
         assert_eq!(find_in_slice(b"abcdefg", b"hjk"), None);
         assert_eq!(find_in_slice(b"abcdefg", b"a"), Some(0));
         assert_eq!(find_in_slice(b"abcdefg", b"ab"), Some(0));
@@ -684,5 +713,19 @@ mod tests {
         assert_eq!(find_in_slice(b"abcdefg", b"efg"), Some(4));
         assert_eq!(find_in_slice(b"abcdefg", b"fg"), Some(5));
         assert_eq!(find_in_slice(b"abcdefg", b"g"), Some(6));
+    }
+
+    #[test]
+    fn test_bytesize() {
+        let cfg = parse_size::Config::new().with_binary();
+        const K: u64 = 1024;
+        const M: u64 = 1024*K;
+        assert_eq!(cfg.parse_size("0"), Ok(0));
+        assert_eq!(cfg.parse_size("1k"), Ok(K));
+        assert_eq!(cfg.parse_size("2m"), Ok(2*M));
+        assert_eq!(cfg.parse_size("0"), Ok(0));
+        assert_eq!(cfg.parse_size("0"), Ok(0));
+        assert_eq!(cfg.parse_size("0"), Ok(0));
+        assert_eq!(cfg.parse_size("0"), Ok(0));
     }
 }

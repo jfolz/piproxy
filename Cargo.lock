@@ -1072,6 +1072,7 @@ dependencies = [
  "clap 4.5.7",
  "log",
  "once_cell",
+ "parse-size",
  "pingora",
 ]
 
@@ -1275,6 +1276,12 @@ dependencies = [
  "smallvec",
  "windows-targets 0.52.5",
 ]
+
+[[package]]
+name = "parse-size"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "944553dd59c802559559161f9816429058b869003836120e262e8caec061b7ae"
 
 [[package]]
 name = "paste"
