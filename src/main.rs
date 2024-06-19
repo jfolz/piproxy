@@ -477,7 +477,7 @@ impl CacheCTX {
     }
 }
 
-fn find_in_slice<T: Eq + Clone>(data: &[T], target: &[T]) -> Option<usize> {
+fn find_in_slice<T: Eq>(data: &[T], target: &[T]) -> Option<usize> {
     data.windows(target.len())
         .position(|window| window == target)
 }
