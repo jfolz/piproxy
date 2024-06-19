@@ -1,5 +1,8 @@
 use async_trait::async_trait;
+use clap::builder::TypedValueParser;
+use clap::Parser;
 use core::any::Any;
+use log::{error, LevelFilter, Metadata, Record};
 use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
@@ -13,7 +16,7 @@ use pingora::{
     http::ResponseHeader,
     prelude::*,
 };
-use std::{io, str};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, SystemTime};
 use std::{
     ffi::{OsStr, OsString},
@@ -26,11 +29,7 @@ use std::{
     fs::{File, OpenOptions},
     io::Write,
 };
-
-use log::{error, LevelFilter, Metadata, Record};
-use std::sync::atomic::Ordering;
-use clap::Parser;
-use clap::builder::TypedValueParser;
+use std::{io, str};
 
 struct SimpleLogger {}
 
@@ -89,7 +88,7 @@ struct FileHitHandler {
     read_size: usize,
 }
 
-const DEFAULT_READ_SIZE: usize = 128*1024;
+const DEFAULT_READ_SIZE: usize = 128 * 1024;
 static READ_SIZE: OnceCell<usize> = OnceCell::new();
 
 impl FileHitHandler {
@@ -211,7 +210,11 @@ impl Drop for FileMissHandler {
         let finished: bool = self.finished.load(Ordering::Relaxed);
         if !finished {
             if let Err(err) = fs::remove_file(&self.path) {
-                error!("cannot remove unfinished file {}: {}", path_to_str(&self.path), err);
+                error!(
+                    "cannot remove unfinished file {}: {}",
+                    path_to_str(&self.path),
+                    err
+                );
             }
             let meta_path = append_to_path(&self.path, ".meta");
             if let Err(err) = fs::remove_file(&meta_path) {
@@ -235,7 +238,7 @@ impl FileStorage {
         if !path.exists() {
             fs::create_dir_all(&path)?;
         }
-        Ok(Self{ path: path })
+        Ok(Self { path: path })
     }
 
     fn data_path(&'static self, key: &CacheKey) -> PathBuf {
@@ -450,7 +453,7 @@ pub struct PyPI {}
 
 impl PyPI {
     fn new() -> PyPI {
-        PyPI {  }
+        PyPI {}
     }
 }
 
@@ -465,7 +468,10 @@ pub struct CacheCTX {
 
 impl CacheCTX {
     fn new() -> CacheCTX {
-        CacheCTX { modify: false, buffer: Vec::new() }
+        CacheCTX {
+            modify: false,
+            buffer: Vec::new(),
+        }
     }
 }
 
@@ -632,12 +638,12 @@ impl TypedValueParser for SizeParser {
         _arg: Option<&clap::Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
-            parse_size::Config::new().with_binary()
+        parse_size::Config::new()
+            .with_binary()
             .parse_size(value.as_encoded_bytes())
             .map(|v| v as usize)
             .map_err(|_| clap::Error::new(clap::error::ErrorKind::InvalidValue))
     }
-
 }
 
 #[derive(Parser, Debug)]
@@ -663,11 +669,7 @@ struct Args {
     read_size: usize,
 
     /// Path to store cached files
-    #[arg(
-        short = 'p',
-        long = "cache-path",
-        default_value = "cache",
-    )]
+    #[arg(short = 'p', long = "cache-path", default_value = "cache")]
     cache_path: PathBuf,
 }
 
@@ -678,7 +680,9 @@ fn main() {
 
     LOGGER.set_level(args.log_level);
 
-    STORAGE.set(FileStorage::new(args.cache_path).unwrap()).unwrap();
+    STORAGE
+        .set(FileStorage::new(args.cache_path).unwrap())
+        .unwrap();
 
     READ_SIZE.set(args.read_size).unwrap();
 
@@ -719,10 +723,10 @@ mod tests {
     fn test_bytesize() {
         let cfg = parse_size::Config::new().with_binary();
         const K: u64 = 1024;
-        const M: u64 = 1024*K;
+        const M: u64 = 1024 * K;
         assert_eq!(cfg.parse_size("0"), Ok(0));
         assert_eq!(cfg.parse_size("1k"), Ok(K));
-        assert_eq!(cfg.parse_size("2m"), Ok(2*M));
+        assert_eq!(cfg.parse_size("2m"), Ok(2 * M));
         assert_eq!(cfg.parse_size("0"), Ok(0));
         assert_eq!(cfg.parse_size("0"), Ok(0));
         assert_eq!(cfg.parse_size("0"), Ok(0));
