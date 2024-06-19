@@ -27,8 +27,10 @@ use std::{
     io::Write,
 };
 
-use log::{debug, error, LevelFilter, Metadata, Record};
+use log::{error, LevelFilter, Metadata, Record};
 use std::sync::atomic::Ordering;
+use clap::Parser;
+use clap::builder::TypedValueParser;
 
 struct SimpleLogger {}
 
@@ -152,15 +154,14 @@ impl HandleHit for FileHandler {
         self: Box<Self>, // because self is always used as a trait object
         _storage: &'static (dyn Storage + Sync),
         _key: &CacheKey,
-        trace: &SpanHandle,
+        _trace: &SpanHandle,
     ) -> Result<()> {
         self.finished.store(true, Ordering::Relaxed);
-        debug!(
-            "{:p} HandleHit finish called {}, trace {:?}",
-            self,
+        /*debug!(
+            "HandleHit finish called {}, trace {:?}",
             self.path_str(),
             trace
-        );
+        );*/
         Ok(())
     }
 
@@ -371,11 +372,11 @@ impl Storage for FileStorage<'_> {
                 Ok(FileHandler::new_box(data_path, fp))
             }
             Err(err) => {
-                debug!(
+                /*debug!(
                     "get_miss_handler error {} {}",
                     data_path.to_str().unwrap(),
                     err
-                );
+                );*/
                 Err(pingora::Error::because(
                     pingora::ErrorType::InternalError,
                     "error opening cache",
@@ -601,9 +602,26 @@ impl ProxyHttp for PyPI {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Name of the person to greet
+    #[arg(
+        short = 'l',
+        long = "log-level",
+        default_value_t = LevelFilter::Info,
+        value_parser = clap::builder::PossibleValuesParser::new(["off", "trace", "debug", "info", "warn", "error"])
+        .map(|s| s.parse::<LevelFilter>().unwrap())
+    )]
+    log_level: LevelFilter,
+}
+
 fn main() {
     LOGGER.install().unwrap();
-    LOGGER.set_level(LevelFilter::Debug);
+
+    let args = Args::parse();
+
+    LOGGER.set_level(args.log_level);
 
     let mut my_server = Server::new(None).unwrap();
     my_server.bootstrap();

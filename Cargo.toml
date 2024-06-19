@@ -9,3 +9,4 @@ pingora = { version = "0.2", features = [ "proxy", "cache" ] }
 bytes = "1.6.0"
 once_cell = "1.19.0"
 log = "0.4.21"
+clap = { version = "4.5.7", features = ["derive"] }
