@@ -675,24 +675,16 @@ mod flags {
 
 fn main() {
     LOGGER.install().unwrap();
-
     let flags = flags::Toplevel::from_env_or_exit();
-
     LOGGER.set_level(flags.get_log_level());
-
-    error!("{:?}", &flags);
-
     STORAGE.set(FileStorage::new(flags.get_cache_path()).unwrap()).unwrap();
-
     READ_SIZE.set(flags.get_read_size()).unwrap();
 
     let mut my_server = Server::new(None).unwrap();
     my_server.bootstrap();
-
     let inner = PyPI::new();
     let mut pypi = http_proxy_service(&my_server.configuration, inner);
     pypi.add_tcp(flags.get_address());
-
     my_server.add_service(pypi);
     my_server.run_forever();
 }
