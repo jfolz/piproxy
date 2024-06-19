@@ -654,8 +654,9 @@ struct Args {
         short = 'l',
         long = "log-level",
         default_value = "info",
-        value_parser = clap::builder::PossibleValuesParser::new(["off", "trace", "debug", "info", "warn", "error"])
-        .map(|s| s.parse::<LevelFilter>().unwrap()),
+        value_parser = clap::builder::PossibleValuesParser::new(
+            ["off", "trace", "debug", "info", "warn", "error"]
+        ).map(|s| s.parse::<LevelFilter>().unwrap()),
     )]
     log_level: LevelFilter,
 
