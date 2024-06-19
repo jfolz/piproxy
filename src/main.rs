@@ -27,16 +27,24 @@ use std::{
     io::Write,
 };
 
-use log::{debug, error, Level, Metadata, Record};
+use log::{debug, error, LevelFilter, Metadata, Record};
 use std::sync::atomic::Ordering;
 
-struct SimpleLogger {
-    level: Level,
+struct SimpleLogger {}
+
+impl SimpleLogger {
+    fn install(&'static self) -> Result<(), log::SetLoggerError> {
+        log::set_logger(self)
+    }
+
+    fn set_level(&self, level: LevelFilter) {
+        log::set_max_level(level);
+    }
 }
 
 impl log::Log for SimpleLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= self.level
+        metadata.level() <= log::max_level()
     }
 
     fn log(&self, record: &Record) {
@@ -48,7 +56,7 @@ impl log::Log for SimpleLogger {
     fn flush(&self) {}
 }
 
-static LOGGER: SimpleLogger = SimpleLogger { level: Level::Info};
+static LOGGER: SimpleLogger = SimpleLogger {};
 
 fn perror<S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
     context: S,
@@ -594,9 +602,8 @@ impl ProxyHttp for PyPI {
 }
 
 fn main() {
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(log::LevelFilter::Debug))
-        .unwrap();
+    LOGGER.install().unwrap();
+    LOGGER.set_level(LevelFilter::Debug);
 
     let mut my_server = Server::new(None).unwrap();
     my_server.bootstrap();
