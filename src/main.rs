@@ -74,32 +74,6 @@ fn e_perror<T, S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
     Err(perror(context, cause))
 }
 
-struct FileHandler {
-    path: PathBuf,
-    fp: File,
-    written: usize,
-    finished: AtomicBool,
-}
-
-impl FileHandler {
-    fn new(path: PathBuf, fp: File) -> FileHandler {
-        Self {
-            path: path,
-            fp: fp,
-            written: 0,
-            finished: false.into(),
-        }
-    }
-
-    fn new_box(path: PathBuf, fp: File) -> Box<FileHandler> {
-        Box::new(Self::new(path, fp))
-    }
-
-    fn path_str<'a>(&self) -> String {
-        String::from(self.path.to_str().unwrap())
-    }
-}
-
 fn append_to_path(p: impl Into<OsString>, s: impl AsRef<OsStr>) -> PathBuf {
     let mut p = p.into();
     p.push(s);
@@ -110,27 +84,30 @@ fn path_to_str(path: impl Into<OsString>) -> String {
     path.into().into_string().unwrap()
 }
 
-impl Drop for FileHandler {
-    fn drop(&mut self) {
-        let finished: bool = self.finished.load(Ordering::Relaxed);
-        if !finished {
-            if let Err(err) = fs::remove_file(&self.path) {
-                error!("cannot remove unfinished file {}: {}", self.path_str(), err);
-            }
-            let meta_path = append_to_path(&self.path, ".meta");
-            if let Err(err) = fs::remove_file(&meta_path) {
-                error!(
-                    "cannot remove unfinished file {}: {}",
-                    path_to_str(&meta_path),
-                    err
-                );
-            }
+struct FileHitHandler {
+    path: PathBuf,
+    fp: File,
+    written: usize,
+    finished: AtomicBool,
+}
+
+impl FileHitHandler {
+    fn new(path: PathBuf, fp: File) -> FileHitHandler {
+        Self {
+            path: path,
+            fp: fp,
+            written: 0,
+            finished: false.into(),
         }
+    }
+
+    fn new_box(path: PathBuf, fp: File) -> Box<FileHitHandler> {
+        Box::new(Self::new(path, fp))
     }
 }
 
 #[async_trait]
-impl HandleHit for FileHandler {
+impl HandleHit for FileHitHandler {
     /// Read cached body
     ///
     /// Return `None` when no more body to read.
@@ -188,8 +165,30 @@ impl HandleHit for FileHandler {
     }
 }
 
+struct FileMissHandler {
+    path: PathBuf,
+    fp: File,
+    written: usize,
+    finished: AtomicBool,
+}
+
+impl FileMissHandler {
+    fn new(path: PathBuf, fp: File) -> Self {
+        Self {
+            path: path,
+            fp: fp,
+            written: 0,
+            finished: false.into(),
+        }
+    }
+
+    fn new_box(path: PathBuf, fp: File) -> Box<Self> {
+        Box::new(Self::new(path, fp))
+    }
+}
+
 #[async_trait]
-impl HandleMiss for FileHandler {
+impl HandleMiss for FileMissHandler {
     /// Write the given body to the storage
     async fn write_body(&mut self, data: bytes::Bytes, _eof: bool) -> Result<()> {
         match self.fp.write_all(&data) {
@@ -211,6 +210,25 @@ impl HandleMiss for FileHandler {
         self.finished.store(true, Ordering::Relaxed);
         //debug!("HandleMiss finish called {}", self.path_str());
         Ok(self.written)
+    }
+}
+
+impl Drop for FileMissHandler {
+    fn drop(&mut self) {
+        let finished: bool = self.finished.load(Ordering::Relaxed);
+        if !finished {
+            if let Err(err) = fs::remove_file(&self.path) {
+                error!("cannot remove unfinished file {}: {}", path_to_str(&self.path), err);
+            }
+            let meta_path = append_to_path(&self.path, ".meta");
+            if let Err(err) = fs::remove_file(&meta_path) {
+                error!(
+                    "cannot remove unfinished file {}: {}",
+                    path_to_str(&meta_path),
+                    err
+                );
+            }
+        }
     }
 }
 
@@ -315,7 +333,7 @@ impl Storage for FileStorage<'_> {
 
         match File::open(&data_path) {
             Ok(fp) => {
-                return Ok(Some((meta, FileHandler::new_box(data_path, fp))));
+                return Ok(Some((meta, FileHitHandler::new_box(data_path, fp))));
                 /*match fp.metadata() {
                     Ok(attr) => {
                         let mtime = attr.modified().unwrap();
@@ -369,7 +387,7 @@ impl Storage for FileStorage<'_> {
         {
             Ok(fp) => {
                 //debug!("get_miss_handler file open {}", data_path.to_str().unwrap());
-                Ok(FileHandler::new_box(data_path, fp))
+                Ok(FileMissHandler::new_box(data_path, fp))
             }
             Err(err) => {
                 /*debug!(
@@ -609,7 +627,7 @@ struct Args {
     #[arg(
         short = 'l',
         long = "log-level",
-        default_value_t = LevelFilter::Info,
+        default_value = "info",
         value_parser = clap::builder::PossibleValuesParser::new(["off", "trace", "debug", "info", "warn", "error"])
         .map(|s| s.parse::<LevelFilter>().unwrap())
     )]
