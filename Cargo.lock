@@ -1064,19 +1064,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "643cb0b8d4fcc284004d5fd0d67ccf61dfffadb7f75e1e71bc420f4688a3a704"
 
 [[package]]
-name = "load_balancer"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "clap 4.5.7",
- "log",
- "once_cell",
- "parse-size",
- "pingora",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1553,6 +1540,19 @@ dependencies = [
  "pin-project-lite",
  "thread_local",
  "tokio",
+]
+
+[[package]]
+name = "piproxy"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "clap 4.5.7",
+ "log",
+ "once_cell",
+ "parse-size",
+ "pingora",
 ]
 
 [[package]]

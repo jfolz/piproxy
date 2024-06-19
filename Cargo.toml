@@ -1,5 +1,5 @@
 [package]
-name = "load_balancer"
+name = "piproxy"
 version = "0.1.0"
 edition = "2021"
 
