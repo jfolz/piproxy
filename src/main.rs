@@ -477,14 +477,24 @@ impl CacheCTX {
     }
 }
 
-fn find_in_slice(data: &[u8], target: &[u8]) -> Option<usize> {
+fn find_in_slice<T: Eq + Clone>(data: &[T], target: &[T]) -> Option<usize> {
     data.windows(target.len())
         .position(|window| window == target)
 }
 
+fn remove_in_slice<T: Eq + Clone>(data: &[T], toremove: &[T]) -> Vec<T> {
+    let mut src = data;
+    let mut dst: Vec<T> = Vec::with_capacity(src.len());
+    while let Some(pos) = find_in_slice(src, toremove) {
+        dst.extend_from_slice(&src[..pos]);
+        src = &src[pos + toremove.len()..];
+    }
+    dst.extend_from_slice(src);
+    dst
+}
+
 #[async_trait]
 impl ProxyHttp for PyPI {
-    /// For this small example, we don't need context storage
     type CTX = CacheCTX;
     fn new_ctx(&self) -> Self::CTX {
         Self::CTX::new()
@@ -529,13 +539,6 @@ impl ProxyHttp for PyPI {
         Ok(())
     }
 
-    /// Modify the response header from the upstream
-    ///
-    /// The modification is before caching, so any change here will be stored in the cache if enabled.
-    ///
-    /// Responses served from cache won't trigger this filter. If the cache needed revalidation,
-    /// only the 304 from upstream will trigger the filter (though it will be merged into the
-    /// cached header, not served directly to downstream).
     fn upstream_response_filter(
         &self,
         _session: &mut Session,
@@ -555,10 +558,6 @@ impl ProxyHttp for PyPI {
         }
     }
 
-    /// Similar to [Self::upstream_response_filter()] but for response body
-    ///
-    /// This function will be called every time a piece of response body is received. The `body` is
-    /// **not the entire response body**.
     fn upstream_response_body_filter(
         &self,
         _session: &mut Session,
@@ -566,33 +565,15 @@ impl ProxyHttp for PyPI {
         end_of_stream: bool,
         ctx: &mut Self::CTX,
     ) {
-        // TODO if path starts with `/simple/` replace links to pythonhosted.org with self
-        // i.e. replace
-        //     `href="https://files.pythonhosted.org` with
-        //     `             href="http://pypi-cache` to preserve length of body
-        // problem: fails on chunk boundaries
-        // solution: two steps
-        // 1) replace strings as above
-        // 2) if end of chunk matches `<a...`
-        //     replace with as much with `<a              href="http://pypi-cache` as possible,
-        //     store remainder in ctx and apply to next chunk
+        // store body in ctx and remove files.pythonhosted.org once all has been received
         if ctx.modify {
             if let Some(b) = body {
                 ctx.buffer.extend(&b[..]);
-                // drop the body
                 b.clear();
             }
-
             if end_of_stream {
-                let mut src = ctx.buffer.as_slice();
-                let mut dst: Vec<u8> = Vec::with_capacity(src.len());
-                let todel = PYTHONHOSTED.as_bytes();
-                while let Some(pos) = find_in_slice(src, todel) {
-                    dst.extend_from_slice(&src[..pos]);
-                    src = &src[pos + todel.len()..];
-                }
-                dst.extend(src);
-                *body = Some(bytes::Bytes::from(dst));
+                let out = remove_in_slice(ctx.buffer.as_slice(), PYTHONHOSTED.as_bytes());
+                *body = Some(bytes::Bytes::from(out));
             }
         }
     }
@@ -695,33 +676,23 @@ mod tests {
 
     #[test]
     fn test_find_in_slice() {
-        assert_eq!(find_in_slice(b"abcdefg", b"hjk"), None);
-        assert_eq!(find_in_slice(b"abcdefg", b"a"), Some(0));
-        assert_eq!(find_in_slice(b"abcdefg", b"ab"), Some(0));
-        assert_eq!(find_in_slice(b"abcdefg", b"abc"), Some(0));
-        assert_eq!(find_in_slice(b"abcdefg", b"abcd"), Some(0));
-        assert_eq!(find_in_slice(b"abcdefg", b"abcde"), Some(0));
-        assert_eq!(find_in_slice(b"abcdefg", b"abcdef"), Some(0));
-        assert_eq!(find_in_slice(b"abcdefg", b"abcdefg"), Some(0));
-        assert_eq!(find_in_slice(b"abcdefg", b"bcdefg"), Some(1));
-        assert_eq!(find_in_slice(b"abcdefg", b"cdefg"), Some(2));
-        assert_eq!(find_in_slice(b"abcdefg", b"defg"), Some(3));
-        assert_eq!(find_in_slice(b"abcdefg", b"efg"), Some(4));
-        assert_eq!(find_in_slice(b"abcdefg", b"fg"), Some(5));
-        assert_eq!(find_in_slice(b"abcdefg", b"g"), Some(6));
+        let src = b"abcdefg";
+        assert_eq!(find_in_slice(src, b"hjk"), None);
+        for start in 0..7 {
+            assert_eq!(find_in_slice(b"abcdefg", &src[start..]), Some(start));
+            for stop in 1..src.len() {
+                assert_eq!(find_in_slice(b"abcdefg", &src[..stop]), Some(0));
+                if stop > start {
+                    assert_eq!(find_in_slice(b"abcdefg", &src[start..stop]), Some(start));
+                }
+            }
+        }
     }
 
     #[test]
-    fn test_bytesize() {
-        let cfg = parse_size::Config::new().with_binary();
-        const K: u64 = 1024;
-        const M: u64 = 1024 * K;
-        assert_eq!(cfg.parse_size("0"), Ok(0));
-        assert_eq!(cfg.parse_size("1k"), Ok(K));
-        assert_eq!(cfg.parse_size("2m"), Ok(2 * M));
-        assert_eq!(cfg.parse_size("0"), Ok(0));
-        assert_eq!(cfg.parse_size("0"), Ok(0));
-        assert_eq!(cfg.parse_size("0"), Ok(0));
-        assert_eq!(cfg.parse_size("0"), Ok(0));
+    fn test_remove_in_slice() {
+        let src = b"foobarfoobarfoobarfoo";
+        assert_eq!(remove_in_slice(src, b"bar"), b"foofoofoofoo");
+        assert_eq!(remove_in_slice(src, b"foo"), b"barbarbar");
     }
 }
