@@ -372,7 +372,7 @@ impl Storage for FileStorage {
         store_cachemeta(meta, &meta_path)?;
 
         let data_path = self.data_path(key);
-        ensure_parent_dirs_exist(&meta_path)?;
+        ensure_parent_dirs_exist(&data_path)?;
 
         match OpenOptions::new()
             .create(true)
