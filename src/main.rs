@@ -576,6 +576,12 @@ impl ProxyHttp for PyPI<'_> {
 
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
         let storage = STORAGE.get().unwrap();
+        // TODO add 
+        // eviction: optionally the eviction manager, without it, nothing will be evicted from the storage
+        // predictor: optionally a cache predictor. The cache predictor predicts whether something is likely to be cacheable or not.
+        //            This is useful because the proxy can apply different types of optimization to cacheable and uncacheable requests.
+        // cache_lock: optionally a cache lock which handles concurrent lookups to the same asset.
+        //             Without it such lookups will all be allowed to fetch the asset independently.
         session.cache.enable(storage, None, None, None);
         Ok(())
     }
