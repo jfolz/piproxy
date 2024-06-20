@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bstr::Finder;
 use core::any::Any;
 use log::{error, LevelFilter, Metadata, Record};
 use once_cell::sync::OnceCell;
@@ -14,7 +15,6 @@ use pingora::{
     http::ResponseHeader,
     prelude::*,
 };
-use std::{str::FromStr, sync::atomic::Ordering};
 use std::time::{Duration, SystemTime};
 use std::{
     ffi::{OsStr, OsString},
@@ -28,6 +28,7 @@ use std::{
     io::Write,
 };
 use std::{io, str};
+use std::{str::FromStr, sync::atomic::Ordering};
 
 struct SimpleLogger {}
 
@@ -449,20 +450,19 @@ impl Storage for FileStorage {
 static STORAGE: OnceCell<FileStorage> = OnceCell::new();
 const PYPI_ORG: &str = "pypi.org";
 const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
-const PYTHONHOSTED: &str = "https://files.pythonhosted.org";
-
-use bstr::Finder;
+const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
+const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
 pub struct PyPI<'a> {
     finder_content_type: Finder<'a>,
-    finder_url: Finder<'a>
+    finder_url: Finder<'a>,
 }
 
 impl<'a> PyPI<'a> {
     fn new() -> PyPI<'a> {
         PyPI {
-            finder_content_type: Finder::new(b"text/html"),
-            finder_url: Finder::new(PYTHONHOSTED),
+            finder_content_type: Finder::new(CONTENT_TYPE_TEXT_HTML),
+            finder_url: Finder::new(HTTPS_FILES_PYTHONHOSTED_ORG),
         }
     }
 }
@@ -485,12 +485,13 @@ impl CacheCTX {
     }
 }
 
-fn remove_in_slice<T: Clone>(data: &[T], finder: &Finder) -> Vec<T> 
-where [T]: AsRef<[u8]>
+fn remove_in_slice<B: Clone>(data: &[B], finder: &Finder) -> Vec<B>
+where
+    [B]: AsRef<[u8]>,
 {
     let n = finder.needle().len();
     let mut src = data;
-    let mut dst: Vec<T> = Vec::with_capacity(src.len());
+    let mut dst: Vec<B> = Vec::with_capacity(src.len());
     while let Some(pos) = finder.find(src) {
         dst.extend_from_slice(&src[..pos]);
         src = &src[pos + n..];
@@ -624,7 +625,8 @@ impl FromStr for Unit {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         parse_size::Config::new()
             .with_binary()
-            .parse_size(s).map(|v| Self(v as usize))
+            .parse_size(s)
+            .map(|v| Self(v as usize))
     }
 }
 
@@ -649,7 +651,9 @@ mod flags {
             self.address.as_deref().unwrap_or("localhost:6188")
         }
         pub fn get_cache_path(&self) -> PathBuf {
-            self.cache_path.clone().unwrap_or_else(|| PathBuf::from("cache"))
+            self.cache_path
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("cache"))
         }
         pub fn get_read_size(&self) -> usize {
             self.read_size.as_ref().map_or(DEFAULT_READ_SIZE, |v| v.0)
@@ -664,7 +668,8 @@ fn main() {
     LOGGER.install().unwrap();
     let flags = flags::Toplevel::from_env_or_exit();
     LOGGER.set_level(flags.get_log_level());
-    STORAGE.set(FileStorage::new(flags.get_cache_path()).unwrap()).unwrap();
+    let storage = FileStorage::new(flags.get_cache_path()).unwrap();
+    STORAGE.set(storage).unwrap();
     READ_SIZE.set(flags.get_read_size()).unwrap();
 
     let mut my_server = Server::new(None).unwrap();
