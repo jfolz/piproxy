@@ -469,8 +469,8 @@ pub struct CacheCTX {
 }
 
 impl CacheCTX {
-    fn new() -> CacheCTX {
-        CacheCTX {
+    fn new() -> Self {
+        Self {
             modify: false,
             buffer: Vec::new(),
         }
