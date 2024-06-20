@@ -109,9 +109,6 @@ impl FileHitHandler {
 
 #[async_trait]
 impl HandleHit for FileHitHandler {
-    /// Read cached body
-    ///
-    /// Return `None` when no more body to read.
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
         let mut buf = vec![0; self.read_size];
         match self.fp.read(&mut buf) {
@@ -127,7 +124,6 @@ impl HandleHit for FileHitHandler {
         }
     }
 
-    /// Finish the current cache hit
     async fn finish(
         self: Box<Self>, // because self is always used as a trait object
         _storage: &'static (dyn Storage + Sync),
@@ -137,7 +133,6 @@ impl HandleHit for FileHitHandler {
         Ok(())
     }
 
-    /// Whether this storage allow seeking to a certain range of body
     fn can_seek(&self) -> bool {
         true
     }
@@ -146,15 +141,12 @@ impl HandleHit for FileHitHandler {
     ///
     /// `end: None` means to read to the end of the body.
     fn seek(&mut self, start: usize, _end: Option<usize>) -> Result<()> {
-        // to prevent impl can_seek() without impl seek
         if let Err(err) = self.fp.seek(std::io::SeekFrom::Start(start as u64)) {
             return e_perror("error seeking in cache", err);
         }
         Ok(())
     }
-    // TODO: fn is_stream_hit()
 
-    /// Helper function to cast the trait object to concrete types
     fn as_any(&self) -> &(dyn Any + Send + Sync) {
         todo!("as_any")
     }
@@ -195,13 +187,10 @@ impl HandleMiss for FileMissHandler {
         }
     }
 
-    /// Finish the cache admission
-    ///
-    /// When `self` is dropped without calling this function, the storage should consider this write
-    /// failed.
     async fn finish(
         self: Box<Self>, // because self is always used as a trait object
     ) -> Result<usize> {
+        // remember that the write finished properly
         self.finished.store(true, Ordering::Relaxed);
         //debug!("HandleMiss finish called {}", self.path_str());
         Ok(self.written)
