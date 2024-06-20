@@ -451,11 +451,19 @@ const PYPI_ORG: &str = "pypi.org";
 const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const PYTHONHOSTED: &str = "https://files.pythonhosted.org";
 
-pub struct PyPI {}
+use bstr::Finder;
 
-impl PyPI {
-    fn new() -> PyPI {
-        PyPI {}
+pub struct PyPI<'a> {
+    finder_content_type: Finder<'a>,
+    finder_url: Finder<'a>
+}
+
+impl<'a> PyPI<'a> {
+    fn new() -> PyPI<'a> {
+        PyPI {
+            finder_content_type: Finder::new(b"text/html"),
+            finder_url: Finder::new(PYTHONHOSTED),
+        }
     }
 }
 
@@ -477,24 +485,22 @@ impl CacheCTX {
     }
 }
 
-fn find_in_slice<T: Eq>(data: &[T], target: &[T]) -> Option<usize> {
-    data.windows(target.len())
-        .position(|window| window == target)
-}
-
-fn remove_in_slice<T: Eq + Clone>(data: &[T], toremove: &[T]) -> Vec<T> {
+fn remove_in_slice<T: Clone>(data: &[T], finder: &Finder) -> Vec<T> 
+where [T]: AsRef<[u8]>
+{
+    let n = finder.needle().len();
     let mut src = data;
     let mut dst: Vec<T> = Vec::with_capacity(src.len());
-    while let Some(pos) = find_in_slice(src, toremove) {
+    while let Some(pos) = finder.find(src) {
         dst.extend_from_slice(&src[..pos]);
-        src = &src[pos + toremove.len()..];
+        src = &src[pos + n..];
     }
     dst.extend_from_slice(src);
     dst
 }
 
 #[async_trait]
-impl ProxyHttp for PyPI {
+impl ProxyHttp for PyPI<'_> {
     type CTX = CacheCTX;
     fn new_ctx(&self) -> Self::CTX {
         Self::CTX::new()
@@ -547,7 +553,7 @@ impl ProxyHttp for PyPI {
     ) {
         // only modify html pages
         if let Some(ct) = upstream_response.headers.get("Content-Type") {
-            if let Some(_) = find_in_slice(ct.as_bytes(), b"text/html") {
+            if let Some(_) = self.finder_content_type.find(ct.as_bytes()) {
                 ctx.modify = true;
                 // Remove content-length because the size of the new body is unknown
                 upstream_response.remove_header("Content-Length");
@@ -572,7 +578,7 @@ impl ProxyHttp for PyPI {
                 b.clear();
             }
             if end_of_stream {
-                let out = remove_in_slice(ctx.buffer.as_slice(), PYTHONHOSTED.as_bytes());
+                let out = remove_in_slice(ctx.buffer.as_slice(), &self.finder_url);
                 *body = Some(bytes::Bytes::from(out));
             }
         }
@@ -675,24 +681,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_find_in_slice() {
-        let src = b"abcdefg";
-        assert_eq!(find_in_slice(src, b"hjk"), None);
-        for start in 0..7 {
-            assert_eq!(find_in_slice(b"abcdefg", &src[start..]), Some(start));
-            for stop in 1..src.len() {
-                assert_eq!(find_in_slice(b"abcdefg", &src[..stop]), Some(0));
-                if stop > start {
-                    assert_eq!(find_in_slice(b"abcdefg", &src[start..stop]), Some(start));
-                }
-            }
-        }
-    }
-
-    #[test]
     fn test_remove_in_slice() {
         let src = b"foobarfoobarfoobarfoo";
-        assert_eq!(remove_in_slice(src, b"bar"), b"foofoofoofoo");
-        assert_eq!(remove_in_slice(src, b"foo"), b"barbarbar");
+        assert_eq!(remove_in_slice(src, &Finder::new(b"bar")), b"foofoofoofoo");
+        assert_eq!(remove_in_slice(src, &Finder::new(b"foo")), b"barbarbar");
     }
 }

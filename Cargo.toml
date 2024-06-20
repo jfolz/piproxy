@@ -11,3 +11,4 @@ once_cell = "1.19.0"
 log = "0.4.21"
 parse-size = "1.0.0"
 xflags = "0.3.2"
+bstr = { version = "1.9.1", default-features = false }
