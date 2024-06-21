@@ -7,6 +7,7 @@ use pingora::{
     cache::{
         eviction::simple_lru::Manager,
         key::{CacheHashKey, CompactCacheKey},
+        lock::CacheLock,
         storage::{HandleHit, HandleMiss},
         trace::SpanHandle,
         CacheKey, CacheMeta, HitHandler, MissHandler,
@@ -94,6 +95,7 @@ struct FileHitHandler {
 
 const DEFAULT_CACHE_SIZE: usize = 1024 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
+const DEFAULT_CACHE_TIMEOUT: u64 = 60;
 static READ_SIZE: OnceCell<usize> = OnceCell::new();
 
 impl FileHitHandler {
@@ -469,6 +471,7 @@ impl Storage for FileStorage {
 
 static STORAGE: OnceCell<FileStorage> = OnceCell::new();
 static EVICTION: OnceCell<Manager> = OnceCell::new();
+static CACHE_LOCK: OnceCell<CacheLock> = OnceCell::new();
 const PYPI_ORG: &str = "pypi.org";
 const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
@@ -607,17 +610,17 @@ impl ProxyHttp for PyPI<'_> {
     }
 
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        // TODO add
-
         session.cache.enable(
+            // storage: the cache storage backend that implements storage::Storage
             STORAGE.get().unwrap(),
+            // eviction: optionally the eviction manager, without it, nothing will be evicted from the storage
             Some(EVICTION.get().unwrap()),
             // predictor: optionally a cache predictor. The cache predictor predicts whether something is likely to be cacheable or not.
             //            This is useful because the proxy can apply different types of optimization to cacheable and uncacheable requests.
             None,
             // cache_lock: optionally a cache lock which handles concurrent lookups to the same asset.
             //             Without it such lookups will all be allowed to fetch the asset independently.
-            None,
+            CACHE_LOCK.get(),
         );
         Ok(())
     }
@@ -666,6 +669,14 @@ mod flags {
 
     xflags::xflags! {
         cmd toplevel {
+            /// Whether this server should try to upgrade from an running old server
+            optional -u,--upgrade
+            /// Whether should run this server in the background
+            optional -d,--daemon
+            /// Test the configuration and exit
+            optional -t,--test
+            /// The path to the configuration file
+            optional -c,--conf conf: String
             /// Bind address
             optional -a,--address address: String
             /// Path where cached files are stored
@@ -676,14 +687,26 @@ mod flags {
             optional -c,--chunk-size chunk_size: Unit
             /// Set the log level
             optional -l,--log-level log_level: LevelFilter
+            /// Set the log level
+            optional -t,--cache-timeout cache_timeout: u64
         }
     }
 
-    macro_rules! getter {
+    macro_rules! getter_unit {
         ($field:ident, $default:expr) => {
             paste::paste! {
                 pub fn [<get_ $field>](&self) -> usize {
                     self.$field.as_ref().map_or($default, |v| v.0)
+                }
+            }
+        };
+    }
+
+    macro_rules! getter_default {
+        ($field:ident, $type:ident, $default:expr) => {
+            paste::paste! {
+                pub fn [<get_ $field>](&self) -> $type {
+                    self.$field.unwrap_or($default)
                 }
             }
         };
@@ -698,11 +721,10 @@ mod flags {
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("cache"))
         }
-        getter!(chunk_size, DEFAULT_CHUNK_SIZE);
-        getter!(cache_size, DEFAULT_CACHE_SIZE);
-        pub fn get_log_level(&self) -> LevelFilter {
-            self.log_level.unwrap_or(DEFAULT_LOG_LEVEL)
-        }
+        getter_unit!(chunk_size, DEFAULT_CHUNK_SIZE);
+        getter_unit!(cache_size, DEFAULT_CACHE_SIZE);
+        getter_default!(log_level, LevelFilter, DEFAULT_LOG_LEVEL);
+        getter_default!(cache_timeout, u64, DEFAULT_CACHE_TIMEOUT);
     }
 }
 
@@ -710,14 +732,31 @@ fn main() {
     LOGGER.install().unwrap();
     let flags = flags::Toplevel::from_env_or_exit();
     LOGGER.set_level(flags.get_log_level());
+
     let storage = FileStorage::new(flags.get_cache_path()).unwrap();
     STORAGE.set(storage).unwrap();
     READ_SIZE.set(flags.get_chunk_size()).unwrap();
-    if let Err(_) = EVICTION.set(Manager::new(flags.get_cache_size())) {
+
+    let manager = Manager::new(flags.get_cache_size());
+    //manager.load(flags.get_cache_path().to_str().unwrap());
+    if let Err(_) = EVICTION.set(manager) {
         panic!("eviction manager already set");
     }
 
-    let mut my_server = Server::new(None).unwrap();
+    if let Err(_) = CACHE_LOCK.set(CacheLock::new(Duration::from_secs(
+        flags.get_cache_timeout(),
+    ))) {
+        panic!("cache lock already set");
+    }
+
+    let pingora_opts = Opt {
+        upgrade: flags.upgrade,
+        daemon: flags.daemon,
+        nocapture: false,
+        test: flags.test,
+        conf: flags.conf.to_owned(),
+    };
+    let mut my_server = Server::new(pingora_opts).unwrap();
     my_server.bootstrap();
     let inner = PyPI::new();
     let mut pypi = http_proxy_service(&my_server.configuration, inner);
