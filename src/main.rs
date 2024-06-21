@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use bstr::Finder;
-use core::any::Any;
+use core::{any::Any, panic};
 use log::{error, LevelFilter, Metadata, Record};
 use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
+        eviction::lru::Manager,
         key::{CacheHashKey, CompactCacheKey},
         storage::{HandleHit, HandleMiss},
         trace::SpanHandle,
@@ -91,14 +92,15 @@ struct FileHitHandler {
     read_size: usize,
 }
 
-const DEFAULT_READ_SIZE: usize = 128 * 1024;
+const DEFAULT_CACHE_SIZE: usize = 1024 * 1024 * 1024;
+const DEFAULT_CHUNK_SIZE: usize = 128 * 1024;
 static READ_SIZE: OnceCell<usize> = OnceCell::new();
 
 impl FileHitHandler {
     fn new(fp: File) -> FileHitHandler {
         Self {
             fp: fp,
-            read_size: *READ_SIZE.get().unwrap_or(&DEFAULT_READ_SIZE),
+            read_size: *READ_SIZE.get().unwrap_or(&DEFAULT_CHUNK_SIZE),
         }
     }
 
@@ -402,8 +404,8 @@ impl Storage for FileStorage {
     /// Delete the cached asset for the given key
     ///
     /// [CompactCacheKey] is used here because it is how eviction managers store the keys
-    async fn purge(&'static self, _key: &CompactCacheKey, _trace: &SpanHandle) -> Result<bool> {
-        todo!("purge")
+    async fn purge(&'static self, key: &CompactCacheKey, _trace: &SpanHandle) -> Result<bool> {
+        todo!("purge {:?}", key)
     }
 
     /// Update cache header and metadata for the already stored asset.
@@ -437,6 +439,7 @@ impl Storage for FileStorage {
 }
 
 static STORAGE: OnceCell<FileStorage> = OnceCell::new();
+static EVICTION: OnceCell<Manager<16>> = OnceCell::new();
 const PYPI_ORG: &str = "pypi.org";
 const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
@@ -575,14 +578,18 @@ impl ProxyHttp for PyPI<'_> {
     }
 
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        let storage = STORAGE.get().unwrap();
-        // TODO add 
-        // eviction: optionally the eviction manager, without it, nothing will be evicted from the storage
-        // predictor: optionally a cache predictor. The cache predictor predicts whether something is likely to be cacheable or not.
-        //            This is useful because the proxy can apply different types of optimization to cacheable and uncacheable requests.
-        // cache_lock: optionally a cache lock which handles concurrent lookups to the same asset.
-        //             Without it such lookups will all be allowed to fetch the asset independently.
-        session.cache.enable(storage, None, None, None);
+        // TODO add
+
+        session.cache.enable(
+            STORAGE.get().unwrap(),
+            Some(EVICTION.get().unwrap()),
+            // predictor: optionally a cache predictor. The cache predictor predicts whether something is likely to be cacheable or not.
+            //            This is useful because the proxy can apply different types of optimization to cacheable and uncacheable requests.
+            None,
+            // cache_lock: optionally a cache lock which handles concurrent lookups to the same asset.
+            //             Without it such lookups will all be allowed to fetch the asset independently.
+            None,
+        );
         Ok(())
     }
 
@@ -635,10 +642,22 @@ mod flags {
             /// Path where cached files are stored
             optional -p,--cache-path cache_path: PathBuf
             /// Path where cached files are stored
-            optional -s,--read-size read_size: Unit
+            optional -s,--cache-size cache_size: Unit
+            /// Path where cached files are stored
+            optional -c,--chunk-size chunk_size: Unit
             /// Set the log level
             optional -l,--log-level log_level: LevelFilter
         }
+    }
+
+    macro_rules! getter {
+        ($field:ident, $default:expr) => {
+            paste::paste! {
+                pub fn [<get_ $field>](&self) -> usize {
+                    self.$field.as_ref().map_or($default, |v| v.0)
+                }
+            }
+        };
     }
 
     impl Toplevel {
@@ -650,9 +669,8 @@ mod flags {
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("cache"))
         }
-        pub fn get_read_size(&self) -> usize {
-            self.read_size.as_ref().map_or(DEFAULT_READ_SIZE, |v| v.0)
-        }
+        getter!(chunk_size, DEFAULT_CHUNK_SIZE);
+        getter!(cache_size, DEFAULT_CACHE_SIZE);
         pub fn get_log_level(&self) -> LevelFilter {
             self.log_level.unwrap_or(DEFAULT_LOG_LEVEL)
         }
@@ -665,7 +683,10 @@ fn main() {
     LOGGER.set_level(flags.get_log_level());
     let storage = FileStorage::new(flags.get_cache_path()).unwrap();
     STORAGE.set(storage).unwrap();
-    READ_SIZE.set(flags.get_read_size()).unwrap();
+    READ_SIZE.set(flags.get_chunk_size()).unwrap();
+    if let Err(_) = EVICTION.set(Manager::with_capacity(flags.get_cache_size(), 16)) {
+        panic!("eviction manager already set");
+    }
 
     let mut my_server = Server::new(None).unwrap();
     my_server.bootstrap();

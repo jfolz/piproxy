@@ -1454,6 +1454,7 @@ dependencies = [
  "log",
  "once_cell",
  "parse-size",
+ "paste",
  "pingora",
  "xflags",
 ]
