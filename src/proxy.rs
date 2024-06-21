@@ -126,7 +126,7 @@ impl ProxyHttp for PyPIProxy<'_> {
         upstream_request: &mut RequestHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<()> {
-        // for pacakges use files.pythonhosted.org
+        // for packages use files.pythonhosted.org
         if request_path(session).starts_with(b"/packages/") {
             upstream_request
                 .insert_header("Host", FILES_PYTHONHOSTED_ORG)
