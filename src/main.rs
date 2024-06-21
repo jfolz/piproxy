@@ -5,7 +5,7 @@ use log::{error, LevelFilter, Metadata, Record};
 use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
-        eviction::lru::Manager,
+        eviction::simple_lru::Manager,
         key::{CacheHashKey, CompactCacheKey},
         storage::{HandleHit, HandleMiss},
         trace::SpanHandle,
@@ -236,9 +236,15 @@ impl FileStorage {
     }
 
     fn data_path(&'static self, key: &CacheKey) -> PathBuf {
+        self.path.join(&key.to_compact().primary())
+    }
+    fn data_path_from_compact(&'static self, key: &CompactCacheKey) -> PathBuf {
         self.path.join(&key.primary())
     }
     fn meta_path(&'static self, key: &CacheKey) -> PathBuf {
+        self.path.join(key.to_compact().primary() + ".meta")
+    }
+    fn meta_path_from_compact(&'static self, key: &CompactCacheKey) -> PathBuf {
         self.path.join(key.primary() + ".meta")
     }
 }
@@ -405,7 +411,31 @@ impl Storage for FileStorage {
     ///
     /// [CompactCacheKey] is used here because it is how eviction managers store the keys
     async fn purge(&'static self, key: &CompactCacheKey, _trace: &SpanHandle) -> Result<bool> {
-        todo!("purge {:?}", key)
+        log::info!("purge {}", key.primary());
+        let meta_path = self.meta_path_from_compact(key);
+        let data_path = self.data_path_from_compact(key);
+        let err_meta = fs::remove_file(&meta_path);
+        let err_data = fs::remove_file(&data_path);
+        match (err_meta, err_data) {
+            (Ok(()), Ok(())) => Ok(true),
+            (Err(e1), Ok(())) => e_perror(
+                format!("Failed to remove meta file {}", meta_path.display()),
+                e1,
+            ),
+            (Ok(()), Err(e2)) => e_perror(
+                format!("Failed to remove data file {}", data_path.display()),
+                e2,
+            ),
+            (Err(e1), Err(e2)) => e_perror(
+                format!(
+                    "Failed to remove meta and data files {}: {}, {}",
+                    meta_path.display(),
+                    e1,
+                    data_path.display(),
+                ),
+                e2,
+            ),
+        }
     }
 
     /// Update cache header and metadata for the already stored asset.
@@ -432,14 +462,13 @@ impl Storage for FileStorage {
         false
     }
 
-    /// Helper function to cast the trait object to concrete types
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
-        todo!("as_any")
+        self
     }
 }
 
 static STORAGE: OnceCell<FileStorage> = OnceCell::new();
-static EVICTION: OnceCell<Manager<16>> = OnceCell::new();
+static EVICTION: OnceCell<Manager> = OnceCell::new();
 const PYPI_ORG: &str = "pypi.org";
 const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
@@ -684,7 +713,7 @@ fn main() {
     let storage = FileStorage::new(flags.get_cache_path()).unwrap();
     STORAGE.set(storage).unwrap();
     READ_SIZE.set(flags.get_chunk_size()).unwrap();
-    if let Err(_) = EVICTION.set(Manager::with_capacity(flags.get_cache_size(), 16)) {
+    if let Err(_) = EVICTION.set(Manager::new(flags.get_cache_size())) {
         panic!("eviction manager already set");
     }
 
