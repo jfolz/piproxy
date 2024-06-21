@@ -39,7 +39,7 @@ xflags::xflags! {
         /// Set the log level
         optional -l,--log-level log_level: LevelFilter
         /// Set the log level
-        optional -t,--cache-timeout cache_timeout: u64
+        optional -t,--cache-lock-timeout cache_lock_timeout: u64
     }
 }
 
@@ -75,5 +75,5 @@ impl Piproxy {
     getter_unit!(chunk_size, DEFAULT_CHUNK_SIZE);
     getter_unit!(cache_size, DEFAULT_CACHE_SIZE);
     getter_default!(log_level, LevelFilter, DEFAULT_LOG_LEVEL);
-    getter_default!(cache_timeout, u64, DEFAULT_CACHE_TIMEOUT);
+    getter_default!(cache_lock_timeout, u64, DEFAULT_CACHE_TIMEOUT);
 }

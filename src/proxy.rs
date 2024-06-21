@@ -10,10 +10,9 @@ use pingora::{
     http::ResponseHeader,
     prelude::*,
 };
-use std::time::{Duration, SystemTime};
+use std::{path::PathBuf, time::{Duration, SystemTime}};
 use std::str;
 use crate::storage;
-use crate::flags;
 
 const HOUR: Duration = Duration::from_secs(3600);
 
@@ -26,21 +25,25 @@ const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
 
-pub fn setup(flags: &flags::Piproxy) {
-    let storage = storage::FileStorage::new(flags.get_cache_path()).unwrap();
+pub fn setup(
+    cache_path: PathBuf,
+    cache_size: usize,
+    cache_lock_timeout: u64,
+    chunk_size: usize,
+) {
+    let storage = storage::FileStorage::new(cache_path).unwrap();
     STORAGE.set(storage).unwrap();
-    storage::READ_SIZE.set(flags.get_chunk_size()).unwrap();
+    storage::READ_SIZE.set(chunk_size).unwrap();
 
-    let manager = Manager::new(flags.get_cache_size());
+    let manager = Manager::new(cache_size);
     // TODO save and load manager state
     //manager.load(flags.get_cache_path().to_str().unwrap());
     if let Err(_) = EVICTION.set(manager) {
         panic!("eviction manager already set");
     }
 
-    if let Err(_) = CACHE_LOCK.set(CacheLock::new(Duration::from_secs(
-        flags.get_cache_timeout(),
-    ))) {
+    let timeout = Duration::from_secs(cache_lock_timeout);
+    if let Err(_) = CACHE_LOCK.set(CacheLock::new(timeout)) {
         panic!("cache lock already set");
     }
 }
