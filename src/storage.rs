@@ -180,6 +180,10 @@ pub struct FileStorage {
     path: PathBuf,
 }
 
+fn path_from_key (dir: &PathBuf, key: &CompactCacheKey, suffix: &str) -> PathBuf {
+    dir.join(key.combined() + suffix)
+}
+
 impl FileStorage {
     pub fn new(path: PathBuf) -> io::Result<Self> {
         if !path.exists() {
@@ -188,17 +192,17 @@ impl FileStorage {
         Ok(Self { path: path })
     }
 
-    fn data_path(&'static self, key: &CacheKey) -> PathBuf {
-        self.path.join(&key.to_compact().primary())
+    fn data_path (&'static self, key: &CacheKey) -> PathBuf {
+        self.data_path_from_compact(&key.to_compact())
     }
     fn data_path_from_compact(&'static self, key: &CompactCacheKey) -> PathBuf {
-        self.path.join(&key.primary())
+        path_from_key(&self.path, key, "")
     }
     fn meta_path(&'static self, key: &CacheKey) -> PathBuf {
-        self.path.join(key.to_compact().primary() + ".meta")
+        self.meta_path_from_compact(&key.to_compact())
     }
     fn meta_path_from_compact(&'static self, key: &CompactCacheKey) -> PathBuf {
-        self.path.join(key.primary() + ".meta")
+        path_from_key(&self.path, key, ".meta")
     }
 }
 
