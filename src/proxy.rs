@@ -3,10 +3,7 @@ use bstr::{ByteSlice, Finder};
 use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
-        eviction::simple_lru::Manager,
-        lock::CacheLock,
-        CacheMeta,
-        RespCacheable::{self, Cacheable},
+        eviction::simple_lru::Manager, key::HashBinary, lock::CacheLock, CacheMeta, RespCacheable::{self, Cacheable}
     },
     http::{ResponseHeader, StatusCode},
     prelude::*,
@@ -228,6 +225,20 @@ impl ProxyHttp for PyPIProxy<'_> {
             3600,
             resp.clone(),
         )))
+    }
+
+    fn cache_vary_filter(
+        &self,
+        meta: &CacheMeta,
+        _ctx: &mut Self::CTX,
+        _req: &RequestHeader,
+    ) -> Option<HashBinary> {
+        if let Some(ct) = meta.response_header().headers.get("Content-Type") {
+            log::info!("cache_vary_filter {:?}", ct);
+            Some(pingora::cache::key::hash_key(ct.to_str().unwrap()))
+        } else {
+            None
+        }
     }
 }
 
