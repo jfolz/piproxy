@@ -1,5 +1,5 @@
-use log::{LevelFilter, Metadata, Record};
 use crate::defaults::DEFAULT_LOG_LEVEL;
+use log::{LevelFilter, Metadata, Record};
 
 pub struct Logger {}
 

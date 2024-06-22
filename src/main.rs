@@ -1,10 +1,10 @@
 use pingora::prelude::*;
 
 mod defaults;
-mod logger;
 mod flags;
-mod storage;
+mod logger;
 mod proxy;
+mod storage;
 
 fn main() {
     logger::install().unwrap();

@@ -1,3 +1,4 @@
+use crate::defaults::*;
 use async_trait::async_trait;
 use core::any::Any;
 use log::error;
@@ -7,13 +8,15 @@ use pingora::{
         key::{CacheHashKey, CompactCacheKey},
         storage::{HandleHit, HandleMiss},
         trace::SpanHandle,
-        CacheKey, CacheMeta, HitHandler, MissHandler,
-        Storage,
+        CacheKey, CacheMeta, HitHandler, MissHandler, Storage,
     },
     prelude::*,
 };
 use std::{
-    ffi::{OsStr, OsString}, io, path::PathBuf, sync::atomic::{AtomicBool, Ordering}
+    ffi::{OsStr, OsString},
+    io,
+    path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
 };
 use std::{fs, io::Read};
 use std::{fs::create_dir_all, io::Seek, path::Path};
@@ -21,7 +24,6 @@ use std::{
     fs::{File, OpenOptions},
     io::Write,
 };
-use crate::defaults::*;
 
 pub static READ_SIZE: OnceCell<usize> = OnceCell::new();
 

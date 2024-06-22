@@ -1,8 +1,8 @@
+use crate::defaults::*;
 use log::LevelFilter;
 use std::path::PathBuf;
 use std::str;
 use std::str::FromStr;
-use crate::defaults::*;
 
 #[derive(Debug)]
 struct Unit(usize);

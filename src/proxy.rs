@@ -1,17 +1,22 @@
 use async_trait::async_trait;
-use bstr::Finder;
+use bstr::{ByteSlice, Finder};
 use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
         eviction::simple_lru::Manager,
-        lock::CacheLock, CacheMeta,
+        lock::CacheLock,
+        CacheMeta,
         RespCacheable::{self, Cacheable},
     },
-    http::ResponseHeader,
+    http::{ResponseHeader, StatusCode},
     prelude::*,
 };
-use std::{path::PathBuf, time::{Duration, SystemTime}};
 use std::str;
+use std::{
+    path::PathBuf,
+    time::{Duration, SystemTime},
+};
+
 use crate::storage;
 
 const HOUR: Duration = Duration::from_secs(3600);
@@ -20,17 +25,12 @@ static STORAGE: OnceCell<storage::FileStorage> = OnceCell::new();
 static EVICTION: OnceCell<Manager> = OnceCell::new();
 static CACHE_LOCK: OnceCell<CacheLock> = OnceCell::new();
 const PYPI_ORG: &str = "pypi.org";
+const HTTPS_PYPI_ORG: &str = "https://pypi.org";
 const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
-
-pub fn setup(
-    cache_path: PathBuf,
-    cache_size: usize,
-    cache_lock_timeout: u64,
-    chunk_size: usize,
-) {
+pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, chunk_size: usize) {
     let storage = storage::FileStorage::new(cache_path).unwrap();
     STORAGE.set(storage).unwrap();
     storage::READ_SIZE.set(chunk_size).unwrap();
@@ -147,6 +147,16 @@ impl ProxyHttp for PyPIProxy<'_> {
         upstream_response: &mut ResponseHeader,
         ctx: &mut Self::CTX,
     ) {
+        // rewrite header `Location` to point here
+        if upstream_response.status.is_redirection()
+            || upstream_response.status == StatusCode::CREATED
+        {
+            if let Some(loc) = upstream_response.headers.get("Location") {
+                let loc = loc.as_bytes();
+                let loc = loc.replace(HTTPS_PYPI_ORG, b"");
+                upstream_response.insert_header("Location", loc).unwrap();
+            }
+        }
         // only modify html pages
         if let Some(ct) = upstream_response.headers.get("Content-Type") {
             if let Some(_) = self.finder_content_type.find(ct.as_bytes()) {
@@ -223,8 +233,8 @@ impl ProxyHttp for PyPIProxy<'_> {
 
 #[cfg(test)]
 mod tests {
-    use bstr::Finder;
     use super::remove_in_slice;
+    use bstr::Finder;
 
     #[test]
     fn test_remove_in_slice() {
