@@ -87,7 +87,7 @@ impl HandleHit for FileHitHandler {
     }
 
     async fn finish(
-        self: Box<Self>, // because self is always used as a trait object
+        self: Box<Self>,
         _storage: &'static (dyn Storage + Sync),
         _key: &CacheKey,
         _trace: &SpanHandle,
@@ -99,9 +99,6 @@ impl HandleHit for FileHitHandler {
         true
     }
 
-    /// Try to seek to a certain range of the body
-    ///
-    /// `end: None` means to read to the end of the body.
     fn seek(&mut self, start: usize, _end: Option<usize>) -> Result<()> {
         if let Err(err) = self.fp.seek(std::io::SeekFrom::Start(start as u64)) {
             return e_perror("error seeking in cache", err);
@@ -138,7 +135,6 @@ impl FileMissHandler {
 
 #[async_trait]
 impl HandleMiss for FileMissHandler {
-    /// Write the given body to the storage
     async fn write_body(&mut self, data: bytes::Bytes, _eof: bool) -> Result<()> {
         match self.fp.write_all(&data) {
             Ok(()) => {
@@ -149,12 +145,9 @@ impl HandleMiss for FileMissHandler {
         }
     }
 
-    async fn finish(
-        self: Box<Self>, // because self is always used as a trait object
-    ) -> Result<usize> {
+    async fn finish(self: Box<Self>) -> Result<usize> {
         // remember that the write finished properly
         self.finished.store(true, Ordering::Relaxed);
-        //debug!("HandleMiss finish called {}", self.path_str());
         Ok(self.written)
     }
 }
@@ -280,7 +273,6 @@ fn load_cachemeta(path: &Path) -> Result<CacheMeta> {
 
 #[async_trait]
 impl Storage for FileStorage {
-    /// Lookup the storage for the given [CacheKey]
     async fn lookup(
         &'static self,
         key: &CacheKey,
@@ -290,43 +282,16 @@ impl Storage for FileStorage {
 
         let meta = load_cachemeta(&self.meta_path(key))?;
 
-        //debug!("lookup {}", data_path.to_str().unwrap_or(""));
-
         match File::open(&data_path) {
             Ok(fp) => {
                 return Ok(Some((meta, FileHitHandler::new_box(fp))));
-                /*match fp.metadata() {
-                    Ok(attr) => {
-                        let mtime = attr.modified().unwrap();
-                        let fresh_until: SystemTime;
-                        if data_path.extension().map_or(false, |ext| ext == "whl") {
-                            fresh_until = mtime + 9999 * HOUR;
-                        } else {
-                            fresh_until = mtime + HOUR;
-                        }
-
-                        debug!("lookup OK {}", data_path.to_str().unwrap());
-
-                        return Ok(Some((meta, FileHandler::new_box(data_path, fp))));
-                    },
-                    Err(err) => {
-                        debug!("lookup error {} {}", data_path.to_str().unwrap(), err);
-                        return Err(pingora::Error::because(
-                            pingora::ErrorType::InternalError,
-                            "error opening cache",
-                            err,
-                        ))
-                    }
-                }*/
             }
             Err(err) => {
-                //debug!("lookup error {} {}", data_path.to_str().unwrap(), err);
                 return e_perror("error opening cache", err);
             }
         }
     }
 
-    /// Write the given [CacheMeta] to the storage. Return [MissHandler] to write the body later.
     async fn get_miss_handler(
         &'static self,
         key: &CacheKey,
@@ -347,15 +312,9 @@ impl Storage for FileStorage {
             .open(&data_path)
         {
             Ok(fp) => {
-                //debug!("get_miss_handler file open {}", data_path.to_str().unwrap());
                 Ok(FileMissHandler::new_box(data_path, fp))
             }
             Err(err) => {
-                /*debug!(
-                    "get_miss_handler error {} {}",
-                    data_path.to_str().unwrap(),
-                    err
-                );*/
                 Err(pingora::Error::because(
                     pingora::ErrorType::InternalError,
                     "error opening cache",
@@ -365,9 +324,6 @@ impl Storage for FileStorage {
         }
     }
 
-    /// Delete the cached asset for the given key
-    ///
-    /// [CompactCacheKey] is used here because it is how eviction managers store the keys
     async fn purge(&'static self, key: &CompactCacheKey, _trace: &SpanHandle) -> Result<bool> {
         log::info!("purge {}", key.primary());
         let meta_path = self.meta_path_from_compact(key);
@@ -396,7 +352,6 @@ impl Storage for FileStorage {
         }
     }
 
-    /// Update cache header and metadata for the already stored asset.
     async fn update_meta(
         &'static self,
         key: &CacheKey,
@@ -413,9 +368,6 @@ impl Storage for FileStorage {
         Ok(true)
     }
 
-    /// Whether this storage backend supports reading partially written data
-    ///
-    /// This is to indicate when cache should unlock readers
     fn support_streaming_partial_write(&self) -> bool {
         false
     }
