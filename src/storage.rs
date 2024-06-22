@@ -14,7 +14,7 @@ use pingora::{
 };
 use std::{
     ffi::{OsStr, OsString},
-    io,
+    io::{self, ErrorKind},
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -258,16 +258,19 @@ fn store_cachemeta(meta: &CacheMeta, path: &Path) -> Result<()> {
     }
 }
 
-fn load_cachemeta(path: &Path) -> Result<CacheMeta> {
+fn load_cachemeta(path: &Path) -> Option<Result<CacheMeta>> {
     match File::open(&path) {
         Ok(mut fp) => {
             let mut data = Vec::new();
             match fp.read_to_end(&mut data) {
-                Ok(_) => deserialize_cachemeta(&data),
-                Err(err) => return e_perror("error reading cachemeta", err),
+                Ok(_) => Some(deserialize_cachemeta(&data)),
+                Err(err) => Some(e_perror("error reading cachemeta", err))
             }
         }
-        Err(err) => return e_perror("error opening cachemeta", err),
+        Err(err) => {
+            if err.kind() == ErrorKind::NotFound { None }
+            else { Some(e_perror("error opening cachemeta", err)) }
+        }
     }
 }
 
@@ -278,17 +281,20 @@ impl Storage for FileStorage {
         key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<Option<(CacheMeta, HitHandler)>> {
-        let data_path = self.data_path(key);
-
-        let meta = load_cachemeta(&self.meta_path(key))?;
-
-        match File::open(&data_path) {
-            Ok(fp) => {
-                return Ok(Some((meta, FileHitHandler::new_box(fp))));
+        match load_cachemeta(&self.meta_path(key)) {
+            Some(Ok(meta)) => {
+                let data_path = self.data_path(key);
+                match File::open(&data_path) {
+                    Ok(fp) => {
+                        Ok(Some((meta, FileHitHandler::new_box(fp))))
+                    }
+                    Err(err) => {
+                        e_perror("error accessing cached data", err)
+                    }
+                }
             }
-            Err(err) => {
-                return e_perror("error opening cache", err);
-            }
+            Some(Err(err)) => Err(err),
+            None => Ok(None),
         }
     }
 
