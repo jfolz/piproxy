@@ -1,8 +1,6 @@
-use crate::defaults::*;
 use async_trait::async_trait;
 use core::any::Any;
 use log::error;
-use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
         key::{CacheHashKey, CompactCacheKey},
@@ -19,8 +17,6 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
-
-pub static READ_SIZE: OnceCell<usize> = OnceCell::new();
 
 fn perror<S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
     context: S,
@@ -48,15 +44,15 @@ struct FileHitHandler {
 }
 
 impl FileHitHandler {
-    fn new(fp: File) -> FileHitHandler {
+    fn new(fp: File, read_size: usize) -> FileHitHandler {
         Self {
             fp: fp,
-            read_size: *READ_SIZE.get().unwrap_or(&DEFAULT_CHUNK_SIZE),
+            read_size: read_size,
         }
     }
 
-    fn new_box(fp: File) -> Box<FileHitHandler> {
-        Box::new(Self::new(fp))
+    fn new_box(fp: File, read_size: usize) -> Box<FileHitHandler> {
+        Box::new(Self::new(fp, read_size))
     }
 }
 
@@ -169,6 +165,7 @@ impl Drop for FileMissHandler {
 #[derive(Debug)]
 pub struct FileStorage {
     path: PathBuf,
+    read_size: usize,
 }
 
 fn path_from_key (dir: &PathBuf, key: &CompactCacheKey, suffix: &str) -> PathBuf {
@@ -203,11 +200,11 @@ fn deserialize_cachemeta(data: &[u8]) -> Result<CacheMeta> {
 }
 
 impl FileStorage {
-    pub fn new(path: PathBuf) -> io::Result<Self> {
+    pub fn new(path: PathBuf, read_size: usize) -> io::Result<Self> {
         if !path.exists() {
             fs::create_dir_all(&path)?;
         }
-        Ok(Self { path: path })
+        Ok(Self { path: path, read_size: read_size })
     }
 
     fn data_path(&'static self, key: &CompactCacheKey) -> PathBuf {
@@ -315,7 +312,7 @@ impl Storage for FileStorage {
                 let data_path = self.data_path(&key.to_compact());
                 match File::open(&data_path) {
                     Ok(fp) => {
-                        Ok(Some((meta, FileHitHandler::new_box(fp))))
+                        Ok(Some((meta, FileHitHandler::new_box(fp, self.read_size))))
                     }
                     Err(err) => {
                         e_perror("error accessing cached data", err)

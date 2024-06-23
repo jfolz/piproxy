@@ -26,9 +26,8 @@ const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
 pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, chunk_size: usize) {
-    let storage = storage::FileStorage::new(cache_path).unwrap();
+    let storage = storage::FileStorage::new(cache_path, chunk_size).unwrap();
     STORAGE.set(storage).unwrap();
-    storage::READ_SIZE.set(chunk_size).unwrap();
 
     let manager = Manager::new(cache_size);
     // TODO save and load manager state
