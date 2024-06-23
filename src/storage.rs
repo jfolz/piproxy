@@ -14,15 +14,10 @@ use pingora::{
 };
 use std::{
     ffi::{OsStr, OsString},
-    io::{self, ErrorKind},
-    path::PathBuf,
+    fs::{self, File, OpenOptions},
+    io::{self, ErrorKind, Read, Seek, Write},
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
-};
-use std::{fs, io::Read};
-use std::{fs::create_dir_all, io::Seek, path::Path};
-use std::{
-    fs::{File, OpenOptions},
-    io::Write,
 };
 
 pub static READ_SIZE: OnceCell<usize> = OnceCell::new();
@@ -45,10 +40,6 @@ fn append_to_path(p: impl Into<OsString>, s: impl AsRef<OsStr>) -> PathBuf {
     let mut p = p.into();
     p.push(s);
     p.into()
-}
-
-fn path_to_str(path: impl Into<OsString>) -> String {
-    path.into().into_string().unwrap()
 }
 
 struct FileHitHandler {
@@ -159,7 +150,7 @@ impl Drop for FileMissHandler {
             if let Err(err) = fs::remove_file(&self.path) {
                 error!(
                     "cannot remove unfinished file {}: {}",
-                    path_to_str(&self.path),
+                    self.path.to_string_lossy(),
                     err
                 );
             }
@@ -167,7 +158,7 @@ impl Drop for FileMissHandler {
             if let Err(err) = fs::remove_file(&meta_path) {
                 error!(
                     "cannot remove unfinished file {}: {}",
-                    path_to_str(&meta_path),
+                    meta_path.to_string_lossy(),
                     err
                 );
             }
@@ -209,7 +200,7 @@ impl FileStorage {
 fn ensure_parent_dirs_exist(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            if let Err(err) = create_dir_all(parent) {
+            if let Err(err) = fs::create_dir_all(parent) {
                 return e_perror("error creating cache dir", err);
             }
         }
@@ -217,26 +208,31 @@ fn ensure_parent_dirs_exist(path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CacheMetaData<'a>{
+    #[serde(with = "serde_bytes")]
+    internal: &'a [u8],
+    #[serde(with = "serde_bytes")]
+    header: &'a [u8],
+}
+
 fn serialize_cachemeta(meta: &CacheMeta) -> Result<Vec<u8>> {
     match meta.serialize() {
         Ok((internal, header)) => {
-            let prefix = (internal.len() as u64).to_be_bytes();
-            let mut buf = Vec::with_capacity(prefix.len() + internal.len() + header.len());
-            buf.write(&prefix).unwrap();
-            buf.write(&internal).unwrap();
-            buf.write(&header).unwrap();
-            Ok(buf)
+            let wrapper = CacheMetaData{ internal: &internal, header: &header };
+            rmp_serde::to_vec(&wrapper)
+            .map_err(|err| perror("cannot serialize cachemeta", err))
         }
         Err(err) => Err(err),
     }
 }
 
 fn deserialize_cachemeta(data: &[u8]) -> Result<CacheMeta> {
-    let prefix_bytes = <[u8; 8]>::try_from(&data[..8]).unwrap();
-    let prefix = u64::from_be_bytes(prefix_bytes) as usize;
-    let internal = &data[prefix_bytes.len()..prefix_bytes.len() + prefix];
-    let header = &data[prefix_bytes.len() + prefix..];
-    CacheMeta::deserialize(internal, header)
+    //assert_eq!((42, "the Answer"), );
+    match rmp_serde::from_slice::<CacheMetaData>(&data) {
+        Ok(cmd) => CacheMeta::deserialize(cmd.internal, cmd.header),
+        Err(err) => e_perror("cannot deserialize cachemeta", err)
+    }
 }
 
 #[cfg(test)]
@@ -259,26 +255,12 @@ mod tests {
 }
 
 fn store_cachemeta(meta: &CacheMeta, path: &Path) -> Result<()> {
-    match serialize_cachemeta(meta) {
-        Ok(meta_data) => {
-            match OpenOptions::new()
-                .create(true)
-                .read(false)
-                .write(true)
-                .open(&path)
-            {
-                Ok(mut fp) => {
-                    if let Err(err) = fp.write_all(&meta_data) {
-                        e_perror("error writing cachemeta", err)
-                    } else {
-                        Ok(())
-                    }
-                }
-                Err(err) => return e_perror("error storing cachemeta", err),
-            }
-        }
-        Err(err) => return Err(err),
-    }
+    let data = serialize_cachemeta(meta)?;
+    let mut fp = OpenOptions::new().create(true).read(false).write(true).open(&path)
+        .map_err(|err| perror("error opening file", err))?;
+    fp.write_all(&data)
+        .map_err(|err| perror("error writing to file", err))?;
+    Ok(())
 }
 
 fn load_cachemeta(path: &Path) -> Option<Result<CacheMeta>> {
@@ -334,22 +316,9 @@ impl Storage for FileStorage {
         let data_path = self.data_path(key);
         ensure_parent_dirs_exist(&data_path)?;
 
-        match OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&data_path)
-        {
-            Ok(fp) => {
-                Ok(FileMissHandler::new_box(data_path, fp))
-            }
-            Err(err) => {
-                Err(pingora::Error::because(
-                    pingora::ErrorType::InternalError,
-                    "error opening cache",
-                    err,
-                ))
-            }
+        match OpenOptions::new().create(true).read(true).write(true).open(&data_path) {
+            Ok(fp) => Ok(FileMissHandler::new_box(data_path, fp)),
+            Err(err) => e_perror("error opening cache", err),
         }
     }
 
@@ -387,12 +356,8 @@ impl Storage for FileStorage {
         _trace: &SpanHandle,
     ) -> Result<bool> {
         let meta_path = self.meta_path(key);
-        if let Err(err) = ensure_parent_dirs_exist(&meta_path) {
-            return Err(err);
-        }
-        if let Err(err) = store_cachemeta(meta, &meta_path) {
-            return Err(err);
-        }
+        ensure_parent_dirs_exist(&meta_path)?;
+        store_cachemeta(meta, &meta_path)?;
         Ok(true)
     }
 
