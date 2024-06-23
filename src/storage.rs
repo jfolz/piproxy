@@ -239,6 +239,25 @@ fn deserialize_cachemeta(data: &[u8]) -> Result<CacheMeta> {
     CacheMeta::deserialize(internal, header)
 }
 
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+
+    use pingora::http::ResponseHeader;
+
+    use super::*;
+
+    #[test]
+    fn test_serialize_cachemeta() {
+        let now = SystemTime::now();
+        let header = ResponseHeader::build(200, None).unwrap();
+        let meta = CacheMeta::new(now, now, 1, 2, header);
+        let data = serialize_cachemeta(&meta);
+        let meta_new = deserialize_cachemeta(&data.unwrap()).unwrap();
+        assert_eq!(meta.created(), meta_new.created());
+    }
+}
+
 fn store_cachemeta(meta: &CacheMeta, path: &Path) -> Result<()> {
     match serialize_cachemeta(meta) {
         Ok(meta_data) => {
@@ -335,7 +354,6 @@ impl Storage for FileStorage {
     }
 
     async fn purge(&'static self, key: &CompactCacheKey, _trace: &SpanHandle) -> Result<bool> {
-        log::info!("purge {}", key.primary());
         let meta_path = self.meta_path_from_compact(key);
         let data_path = self.data_path_from_compact(key);
         let err_meta = fs::remove_file(&meta_path);

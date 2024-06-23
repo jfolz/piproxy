@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use bstr::{ByteSlice, Finder};
+use bstr::Finder;
 use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
-        eviction::simple_lru::Manager, key::HashBinary, lock::CacheLock, CacheMeta, RespCacheable::{self, Cacheable}
+        cache_control::{CacheControl, InterpretCacheControl}, eviction::simple_lru::Manager, lock::CacheLock, CacheMeta, NoCacheReason, RespCacheable
     },
     http::{ResponseHeader, StatusCode},
     prelude::*,
@@ -15,8 +15,6 @@ use std::{
 };
 
 use crate::storage;
-
-const HOUR: Duration = Duration::from_secs(3600);
 
 static STORAGE: OnceCell<storage::FileStorage> = OnceCell::new();
 static EVICTION: OnceCell<Manager> = OnceCell::new();
@@ -47,14 +45,16 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, ch
 
 pub struct PyPIProxy<'a> {
     finder_content_type: Finder<'a>,
-    finder_url: Finder<'a>,
+    finder_pythonhosted: Finder<'a>,
+    finder_pypi: Finder<'a>,
 }
 
 impl<'a> PyPIProxy<'a> {
     pub fn new() -> PyPIProxy<'a> {
         PyPIProxy {
             finder_content_type: Finder::new(CONTENT_TYPE_TEXT_HTML),
-            finder_url: Finder::new(HTTPS_FILES_PYTHONHOSTED_ORG),
+            finder_pythonhosted: Finder::new(HTTPS_FILES_PYTHONHOSTED_ORG),
+            finder_pypi: Finder::new(HTTPS_PYPI_ORG),
         }
     }
 }
@@ -135,6 +135,8 @@ impl ProxyHttp for PyPIProxy<'_> {
         }
         // server should not compress response
         upstream_request.remove_header("Accept-Encoding");
+        // server should respond with default type
+        upstream_request.remove_header("Accept");
         Ok(())
     }
 
@@ -149,8 +151,7 @@ impl ProxyHttp for PyPIProxy<'_> {
             || upstream_response.status == StatusCode::CREATED
         {
             if let Some(loc) = upstream_response.headers.get("Location") {
-                let loc = loc.as_bytes();
-                let loc = loc.replace(HTTPS_PYPI_ORG, b"");
+                let loc = remove_in_slice(loc.as_bytes(), &self.finder_pypi);
                 upstream_response.insert_header("Location", loc).unwrap();
             }
         }
@@ -181,7 +182,7 @@ impl ProxyHttp for PyPIProxy<'_> {
                 b.clear();
             }
             if end_of_stream {
-                let out = remove_in_slice(ctx.buffer.as_slice(), &self.finder_url);
+                let out = remove_in_slice(ctx.buffer.as_slice(), &self.finder_pythonhosted);
                 *body = Some(bytes::Bytes::from(out));
             }
         }
@@ -205,39 +206,36 @@ impl ProxyHttp for PyPIProxy<'_> {
 
     fn response_cache_filter(
         &self,
-        session: &Session,
+        _session: &Session,
         resp: &ResponseHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<RespCacheable> {
-        let now = SystemTime::now();
-
-        let mut fresh_until: SystemTime = now + HOUR;
-
-        let path = request_path(session);
-        if path.ends_with(b".whl") || path.ends_with(b".tar.gz") {
-            fresh_until = now + 9999 * HOUR;
+        if let Some(control) = CacheControl::from_resp_headers(resp) {
+            use pingora::cache::cache_control::Cacheable;
+            match control.is_cacheable() {
+                Cacheable::Yes | Cacheable::Default => {
+                    let now = SystemTime::now();
+                    let age = match resp.headers.get("Age") {
+                        Some(age) => age.to_str().unwrap_or("0"),
+                        None => "0",
+                    };
+                    let age = u64::from_str_radix(age, 10).unwrap_or(0);
+                    let age = Duration::from_secs(age);
+                    let max_age = Duration::from_secs(control.fresh_sec().unwrap_or(600) as u64);
+                    let fresh_until: SystemTime = now + max_age;
+                    let created = now - age;
+                    let revalidate_sec = control.serve_stale_while_revalidate_sec().unwrap_or(60);
+                    let error_sec = control.serve_stale_if_error_sec().unwrap_or(60);
+                    let meta = CacheMeta::new(fresh_until, created, revalidate_sec, error_sec, resp.clone());
+                    Ok(RespCacheable::Cacheable(meta))
+                },
+                Cacheable::No => {
+                    Ok(RespCacheable::Uncacheable(NoCacheReason::OriginNotCache))
+                },
+            }
         }
-
-        Ok(Cacheable(CacheMeta::new(
-            fresh_until,
-            now,
-            3600,
-            3600,
-            resp.clone(),
-        )))
-    }
-
-    fn cache_vary_filter(
-        &self,
-        meta: &CacheMeta,
-        _ctx: &mut Self::CTX,
-        _req: &RequestHeader,
-    ) -> Option<HashBinary> {
-        if let Some(ct) = meta.response_header().headers.get("Content-Type") {
-            log::info!("cache_vary_filter {:?}", ct);
-            Some(pingora::cache::key::hash_key(ct.to_str().unwrap()))
-        } else {
-            None
+        else {
+            Ok(RespCacheable::Uncacheable(NoCacheReason::OriginNotCache))
         }
     }
 }
