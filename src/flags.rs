@@ -35,7 +35,7 @@ xflags::xflags! {
         /// Path where cached files are stored
         optional -s,--cache-size cache_size: Unit
         /// Path where cached files are stored
-        optional -c,--chunk-size chunk_size: Unit
+        optional -r,--chunk-size chunk_size: Unit
         /// Set the log level
         optional -l,--log-level log_level: LevelFilter
         /// Set the log level
