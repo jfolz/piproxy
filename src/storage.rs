@@ -1,6 +1,5 @@
 use crate::defaults::*;
 use async_trait::async_trait;
-use rusqlite::Connection;
 use core::any::Any;
 use log::error;
 use once_cell::sync::OnceCell;
@@ -18,7 +17,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, ErrorKind, Read, Seek, Write},
     path::{Path, PathBuf},
-    sync::{atomic::{AtomicBool, Ordering}, Mutex},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 pub static READ_SIZE: OnceCell<usize> = OnceCell::new();
@@ -170,15 +169,10 @@ impl Drop for FileMissHandler {
 #[derive(Debug)]
 pub struct FileStorage {
     path: PathBuf,
-    conn: Mutex<Connection>,
 }
 
 fn path_from_key (dir: &PathBuf, key: &CompactCacheKey, suffix: &str) -> PathBuf {
     dir.join(key.combined() + suffix)
-}
-
-fn ioerror(err: rusqlite::Error) -> io::Error {
-    io::Error::new(ErrorKind::Other, err)
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -213,19 +207,7 @@ impl FileStorage {
         if !path.exists() {
             fs::create_dir_all(&path)?;
         }
-        let conn = Connection::open(path.join("state.sqlite"))
-        .map_err(|err| ioerror(err))?;
-
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS cachemeta (
-                cachekey BLOB PRIMARY KEY,
-                internal BLOB NOT NULL,
-                header   BLOB NOT NULL
-            )",
-            (), // empty list of parameters.
-        ).map_err(|err| ioerror(err))?;
-
-        Ok(Self { path: path, conn: Mutex::new(conn) })
+        Ok(Self { path: path })
     }
 
     fn data_path(&'static self, key: &CompactCacheKey) -> PathBuf {
