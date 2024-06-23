@@ -42,6 +42,12 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, ch
     }
 }
 
+pub fn populate_lru(cache_dir: &PathBuf) -> Result<()> {
+    let manager = EVICTION.get().unwrap();
+    // TODO traverse cache dir and insert items into manager
+    Ok(())
+}
+
 pub struct PyPIProxy<'a> {
     finder_content_type: Finder<'a>,
     finder_pythonhosted: Finder<'a>,
