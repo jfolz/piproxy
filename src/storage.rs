@@ -3,7 +3,7 @@ use core::any::Any;
 use log::error;
 use pingora::{
     cache::{
-        key::{CacheHashKey, CompactCacheKey},
+        key::CompactCacheKey,
         storage::{HandleHit, HandleMiss},
         trace::SpanHandle,
         CacheKey, CacheMeta, HitHandler, MissHandler, Storage,
@@ -168,8 +168,11 @@ pub struct FileStorage {
     read_size: usize,
 }
 
-fn path_from_key (dir: &PathBuf, key: &CompactCacheKey, suffix: &str) -> PathBuf {
-    dir.join(key.combined() + suffix)
+fn path_from_key(dir: &PathBuf, key: &CompactCacheKey, suffix: &str) -> PathBuf {
+    let ser = rmp_serde::to_vec(&key).unwrap();
+    let ser = const_hex::encode(ser);
+    assert_eq!(ser.len() % 2, 0, "path encodes to odd length hex {}", ser);
+    dir.join(ser + suffix)
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -287,6 +290,31 @@ impl FileStorage {
         fs::remove_file(&path).map_err(|err| perror("pop cachemeta", err))?;
         Ok(())
     }
+
+    pub fn purge_sync(&'static self, key: &CompactCacheKey) -> Result<bool> {
+        let data_path = self.data_path(key);
+        let err_meta = self.pop_cachemeta(key);
+        let err_data = fs::remove_file(&data_path);
+        match (err_meta, err_data) {
+            (Ok(()), Ok(())) => Ok(true),
+            (Err(e1), Ok(())) => e_perror(
+                "Failed to remove cachemeta {}",
+                e1,
+            ),
+            (Ok(()), Err(e2)) => e_perror(
+                format!("Failed to remove data file {}", data_path.display()),
+                e2,
+            ),
+            (Err(err_meta), Err(err_data)) => e_perror(
+                format!(
+                    "Failed to remove cachemeta {} and data: {}",
+                    err_meta,
+                    data_path.display(),
+                ),
+                err_data,
+            ),
+        }
+    }
 }
 
 fn ensure_parent_dirs_exist(path: &Path) -> Result<()> {
@@ -342,28 +370,7 @@ impl Storage for FileStorage {
     }
 
     async fn purge(&'static self, key: &CompactCacheKey, _trace: &SpanHandle) -> Result<bool> {
-        let data_path = self.data_path(key);
-        let err_meta = self.pop_cachemeta(key);
-        let err_data = fs::remove_file(&data_path);
-        match (err_meta, err_data) {
-            (Ok(()), Ok(())) => Ok(true),
-            (Err(e1), Ok(())) => e_perror(
-                "Failed to remove cachemeta {}",
-                e1,
-            ),
-            (Ok(()), Err(e2)) => e_perror(
-                format!("Failed to remove data file {}", data_path.display()),
-                e2,
-            ),
-            (Err(err_meta), Err(err_data)) => e_perror(
-                format!(
-                    "Failed to remove cachemeta {} and data: {}",
-                    err_meta,
-                    data_path.display(),
-                ),
-                err_data,
-            ),
-        }
+        self.purge_sync(key)
     }
 
     async fn update_meta(

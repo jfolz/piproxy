@@ -3,12 +3,12 @@ use bstr::Finder;
 use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
-        cache_control::{CacheControl, InterpretCacheControl}, eviction::simple_lru::Manager, lock::CacheLock, CacheMeta, NoCacheReason, RespCacheable
+        cache_control::{CacheControl, InterpretCacheControl}, eviction::{simple_lru::Manager, EvictionManager}, key::CompactCacheKey, lock::CacheLock, CacheMeta, NoCacheReason, RespCacheable,
     },
     http::{ResponseHeader, StatusCode},
     prelude::*,
 };
-use std::str;
+use std::{fs::{self, DirEntry}, io::{self, ErrorKind}, os::unix::fs::MetadataExt, str};
 use std::{
     path::PathBuf,
     time::{Duration, SystemTime},
@@ -42,9 +42,49 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, ch
     }
 }
 
-pub fn populate_lru(cache_dir: &PathBuf) -> Result<()> {
+fn has_extension(entry: &DirEntry, ext: &str) -> bool {
+    entry.path().extension().is_some_and(|found| found == ext)
+}
+
+fn key_from_entry(entry: &DirEntry) -> io::Result<CompactCacheKey> {
+    let filename = entry.file_name();
+    let data = filename.as_encoded_bytes();
+    assert_eq!(data.len() % 2, 0, "path has odd length {:?}", filename);
+    let ser: Vec<u8> = const_hex::decode(data)
+    .map_err(|err| io::Error::new(ErrorKind::UnexpectedEof, err))?;
+    rmp_serde::from_slice(&ser)
+    .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
+}
+
+pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
     let manager = EVICTION.get().unwrap();
-    // TODO traverse cache dir and insert items into manager
+    let storage = STORAGE.get().unwrap();
+    let mut todo = vec![cache_dir.clone()];
+    let fresh_delta = Duration::from_secs(356_000_000);
+    loop {
+        if let Some(next) = todo.pop() {
+            for entry in fs::read_dir(next)? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    todo.push(entry.path());
+                }
+                else if !has_extension(&entry, "meta") {
+                    let metadata = entry.metadata()?;
+                    let key = key_from_entry(&entry)?;
+                    let size = metadata.size() as usize;
+                    // can unwrap here, since modified() will either always work or never
+                    let fresh_until = metadata.modified().unwrap() + fresh_delta;
+                    for key in manager.admit(key, size, fresh_until) {
+                        storage.purge_sync(&key)
+                        .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+                    }
+                }
+            }
+        }
+        else {
+            break
+        }
+    }
     Ok(())
 }
 
@@ -249,11 +289,24 @@ impl ProxyHttp for PyPIProxy<'_> {
 mod tests {
     use super::remove_in_slice;
     use bstr::Finder;
+    use pingora::cache::{key::CompactCacheKey, CacheKey};
 
     #[test]
     fn test_remove_in_slice() {
         let src = b"foobarfoobarfoobarfoo";
         assert_eq!(remove_in_slice(src, &Finder::new(b"bar")), b"foofoofoofoo");
         assert_eq!(remove_in_slice(src, &Finder::new(b"foo")), b"barbarbar");
+    }
+
+    #[test]
+    fn test_compactcachekey_serde() {
+        let key = CacheKey::new("", "testrestmest", "");
+        let key = key.to_compact();
+        let out = rmp_serde::to_vec(&key).unwrap();
+        let out = const_hex::encode(out);
+        println!("{}", out);
+        let in_ = const_hex::decode(out).unwrap();
+        let dekey: CompactCacheKey = rmp_serde::from_slice(&in_).unwrap();
+        assert_eq!(key, dekey)
     }
 }
