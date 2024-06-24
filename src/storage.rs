@@ -11,11 +11,9 @@ use pingora::{
     prelude::*,
 };
 use std::{
-    ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
     io::{self, ErrorKind, Read, Seek, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
 };
 
 fn perror<S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
@@ -32,27 +30,19 @@ fn e_perror<T, S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
     Err(perror(context, cause))
 }
 
-fn append_to_path(p: impl Into<OsString>, s: impl AsRef<OsStr>) -> PathBuf {
-    let mut p = p.into();
-    p.push(s);
-    p.into()
-}
-
 struct FileHitHandler {
     fp: File,
     read_size: usize,
 }
 
 impl FileHitHandler {
-    fn new(fp: File, read_size: usize) -> FileHitHandler {
-        Self {
+    fn new(final_path: PathBuf, read_size: usize) -> Result<FileHitHandler> {
+        let fp = File::open(&final_path)
+        .map_err(|err| perror("error opening data file", err))?;
+        Ok(Self {
             fp: fp,
             read_size: read_size,
-        }
-    }
-
-    fn new_box(fp: File, read_size: usize) -> Box<FileHitHandler> {
-        Box::new(Self::new(fp, read_size))
+        })
     }
 }
 
@@ -99,24 +89,28 @@ impl HandleHit for FileHitHandler {
 }
 
 struct FileMissHandler {
-    path: PathBuf,
+    partial_path: PathBuf,
+    final_path: PathBuf,
+    meta_path: PathBuf,
     fp: File,
     written: usize,
-    finished: AtomicBool,
 }
 
 impl FileMissHandler {
-    fn new(path: PathBuf, fp: File) -> Self {
-        Self {
-            path: path,
+    fn new(partial_path: PathBuf, final_path: PathBuf, meta_path: PathBuf) -> Result<Self> {
+        let fp = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&partial_path)
+            .map_err(|err| perror("error creating partial file", err))?;
+        Ok(Self {
+            partial_path,
+            final_path,
+            meta_path,
             fp: fp,
             written: 0,
-            finished: false.into(),
-        }
-    }
-
-    fn new_box(path: PathBuf, fp: File) -> Box<Self> {
-        Box::new(Self::new(path, fp))
+        })
     }
 }
 
@@ -133,30 +127,37 @@ impl HandleMiss for FileMissHandler {
     }
 
     async fn finish(self: Box<Self>) -> Result<usize> {
-        // remember that the write finished properly
-        self.finished.store(true, Ordering::Relaxed);
+        fs::rename(self.partial_path.as_path(), self.final_path.as_path())
+        .map_err(|err| perror("cannot rename partial to final", err))?;
         Ok(self.written)
     }
 }
 
+macro_rules! delete_file_error {
+    ($path:expr, $fmt:expr, $err:expr) => {
+        error!($fmt, $path.to_string_lossy(), $err)
+    };
+}
+
+macro_rules! delete_file {
+    ($path:expr, $fmt:expr) => {
+        if let Err(err) = fs::remove_file($path) { delete_file_error!($path, $fmt, err) }
+    };
+}
+
 impl Drop for FileMissHandler {
     fn drop(&mut self) {
-        let finished: bool = self.finished.load(Ordering::Relaxed);
-        if !finished {
-            if let Err(err) = fs::remove_file(&self.path) {
-                error!(
-                    "cannot remove unfinished file {}: {}",
-                    self.path.to_string_lossy(),
-                    err
-                );
+        match fs::remove_file(&self.partial_path) {
+            // if the partial file is not found, no further action is needed
+            Err(err) if err.kind() == ErrorKind::NotFound => {},
+            // some other error occurred, try to also delete meta file
+            Err(err) => {
+                delete_file_error!(self.partial_path, "cannot remove unfinished partial file {}: {}", err);
+                delete_file!(&self.meta_path, "cannot remove unfinished meta file {}: {}");
             }
-            let meta_path = append_to_path(&self.path, ".meta");
-            if let Err(err) = fs::remove_file(&meta_path) {
-                error!(
-                    "cannot remove unfinished file {}: {}",
-                    meta_path.to_string_lossy(),
-                    err
-                );
+            // if the partial file was deleted, we also need to remove the meta file
+            _ => {
+                delete_file!(&self.meta_path, "cannot remove unfinished meta file {}: {}");
             }
         }
     }
@@ -215,8 +216,12 @@ impl FileStorage {
         })
     }
 
-    fn data_path(&'static self, key: &CompactCacheKey) -> PathBuf {
+    fn final_data_path(&'static self, key: &CompactCacheKey) -> PathBuf {
         path_from_key(&self.path, key, "")
+    }
+
+    fn partial_data_path(&'static self, key: &CompactCacheKey) -> PathBuf {
+        path_from_key(&self.path, key, ".partial")
     }
 
     fn meta_path(&'static self, key: &CompactCacheKey) -> PathBuf {
@@ -264,7 +269,7 @@ impl FileStorage {
     }
 
     pub fn purge_sync(&'static self, key: &CompactCacheKey) -> Result<bool> {
-        let data_path = self.data_path(key);
+        let data_path = self.final_data_path(key);
         let err_meta = self.pop_cachemeta(key);
         let err_data = fs::remove_file(&data_path);
         match (err_meta, err_data) {
@@ -304,13 +309,16 @@ impl Storage for FileStorage {
         key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<Option<(CacheMeta, HitHandler)>> {
-        match self.get_cachemeta(&key.to_compact()) {
+        let key = key.to_compact();
+        // don't return hit if data is partial file
+        if self.partial_data_path(&key).exists() {
+            return Ok(None)
+        }
+        match self.get_cachemeta(&key) {
             Some(Ok(meta)) => {
-                let data_path = self.data_path(&key.to_compact());
-                match File::open(&data_path) {
-                    Ok(fp) => Ok(Some((meta, FileHitHandler::new_box(fp, self.read_size)))),
-                    Err(err) => e_perror("error accessing cached data", err),
-                }
+                let final_path = self.final_data_path(&key);
+                let h = FileHitHandler::new(final_path, self.read_size)?;
+                Ok(Some((meta, Box::new(h))))
             }
             Some(Err(err)) => Err(err),
             None => Ok(None),
@@ -323,20 +331,16 @@ impl Storage for FileStorage {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<MissHandler> {
-        self.put_cachemeta(&key.to_compact(), meta)?;
-
-        let data_path = self.data_path(&key.to_compact());
-        ensure_parent_dirs_exist(&data_path)?;
-
-        match OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&data_path)
-        {
-            Ok(fp) => Ok(FileMissHandler::new_box(data_path, fp)),
-            Err(err) => e_perror("error opening cache", err),
-        }
+        let key = key.to_compact();
+        self.put_cachemeta(&key, meta)?;
+        let partial_path = self.partial_data_path(&key);
+        let final_path = self.final_data_path(&key);
+        let meta_path = self.meta_path(&key);
+        ensure_parent_dirs_exist(&partial_path)?;
+        ensure_parent_dirs_exist(&final_path)?;
+        ensure_parent_dirs_exist(&meta_path)?;
+        let h = FileMissHandler::new(partial_path, final_path, meta_path)?;
+        Ok(Box::new(h))
     }
 
     async fn purge(&'static self, key: &CompactCacheKey, _trace: &SpanHandle) -> Result<bool> {
