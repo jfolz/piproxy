@@ -8,7 +8,7 @@ use pingora::{
     http::{ResponseHeader, StatusCode},
     prelude::*,
 };
-use std::{fs::{self, DirEntry}, io::{self, ErrorKind}, os::unix::fs::MetadataExt, str};
+use std::{any::{Any, TypeId}, fs::{self, DirEntry}, io::{self, ErrorKind}, os::unix::fs::MetadataExt, str};
 use std::{
     path::PathBuf,
     time::{Duration, SystemTime},
@@ -60,7 +60,9 @@ pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
     let manager = EVICTION.get().unwrap();
     let storage = STORAGE.get().unwrap();
     let mut todo = vec![cache_dir.clone()];
-    let fresh_delta = Duration::from_secs(356_000_000);
+    // simple_lru manager does not use fresh_until, make sure this is actually simple_lru
+    assert_eq!(manager.type_id(), TypeId::of::<pingora::cache::eviction::simple_lru::Manager>());
+    let fresh_until = SystemTime::now() + Duration::from_secs(356_000_000);
     loop {
         if let Some(next) = todo.pop() {
             for entry in fs::read_dir(next)? {
@@ -72,8 +74,6 @@ pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
                     let metadata = entry.metadata()?;
                     let key = key_from_entry(&entry)?;
                     let size = metadata.size() as usize;
-                    // can unwrap here, since modified() will either always work or never
-                    let fresh_until = metadata.modified().unwrap() + fresh_delta;
                     for key in manager.admit(key, size, fresh_until) {
                         storage.purge_sync(&key)
                         .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
