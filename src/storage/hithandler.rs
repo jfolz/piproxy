@@ -6,10 +6,10 @@ use pingora::{
     },
     prelude::*,
 };
-use std::{
+use std::path::PathBuf;
+use tokio::{
     fs::File,
-    io::{Read, Seek},
-    path::PathBuf,
+    io::{AsyncReadExt, AsyncSeekExt},
 };
 
 use super::super::error::{e_perror, perror};
@@ -20,8 +20,10 @@ pub struct FileHitHandler {
 }
 
 impl FileHitHandler {
-    pub fn new(final_path: PathBuf, read_size: usize) -> Result<FileHitHandler> {
-        let fp = File::open(&final_path).map_err(|err| perror("error opening data file", err))?;
+    pub async fn new(final_path: PathBuf, read_size: usize) -> Result<FileHitHandler> {
+        let fp = File::open(&final_path)
+            .await
+            .map_err(|err| perror("error opening data file", err))?;
         Ok(Self {
             fp: fp,
             read_size: read_size,
@@ -33,7 +35,7 @@ impl FileHitHandler {
 impl HandleHit for FileHitHandler {
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
         let mut buf = vec![0; self.read_size];
-        match self.fp.read(&mut buf) {
+        match self.fp.read(&mut buf).await {
             Ok(n) => {
                 if n > 0 {
                     let b = bytes::Bytes::from(buf);
@@ -60,10 +62,12 @@ impl HandleHit for FileHitHandler {
     }
 
     fn seek(&mut self, start: usize, _end: Option<usize>) -> Result<()> {
-        if let Err(err) = self.fp.seek(std::io::SeekFrom::Start(start as u64)) {
-            return e_perror("error seeking in cache", err);
-        }
-        Ok(())
+        tokio::runtime::Handle::current().block_on(async {
+            self.fp.seek(std::io::SeekFrom::Start(start as u64))
+            .await
+            .map_err(|err| perror("error seeking in cache", err))
+            .map(|_| ())
+        })
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync) {

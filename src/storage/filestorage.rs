@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::super::error::{e_perror, perror};
+use super::{super::error::{e_perror, perror}, partialhithandler::PartialFileHitHandler};
 use super::hithandler::FileHitHandler;
 use super::misshandler::FileMissHandler;
 
@@ -167,15 +167,17 @@ impl Storage for FileStorage {
         _trace: &SpanHandle,
     ) -> Result<Option<(CacheMeta, HitHandler)>> {
         let key = key.to_compact();
-        // don't return hit if data is partial file
-        if self.partial_data_path(&key).exists() {
-            return Ok(None);
-        }
         match self.get_cachemeta(&key) {
             Some(Ok(meta)) => {
                 let final_path = self.final_data_path(&key);
-                let h = FileHitHandler::new(final_path, self.read_size)?;
-                Ok(Some((meta, Box::new(h))))
+                let partial_path = self.partial_data_path(&key);
+                let h: HitHandler;
+                if partial_path.exists() {
+                    h = Box::new(PartialFileHitHandler::new(final_path, partial_path, self.read_size).await?);
+                } else {
+                    h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                }
+                Ok(Some((meta, h)))
             }
             Some(Err(err)) => Err(err),
             None => Ok(None),
@@ -196,7 +198,7 @@ impl Storage for FileStorage {
         ensure_parent_dirs_exist(&partial_path)?;
         ensure_parent_dirs_exist(&final_path)?;
         ensure_parent_dirs_exist(&meta_path)?;
-        let h = FileMissHandler::new(partial_path, final_path, meta_path)?;
+        let h = FileMissHandler::new(partial_path, final_path, meta_path).await?;
         Ok(Box::new(h))
     }
 
@@ -215,7 +217,7 @@ impl Storage for FileStorage {
     }
 
     fn support_streaming_partial_write(&self) -> bool {
-        false
+        true
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {

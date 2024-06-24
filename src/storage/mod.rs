@@ -1,4 +1,5 @@
 mod hithandler;
+mod partialhithandler;
 mod misshandler;
 mod filestorage;
 
