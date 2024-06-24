@@ -1,10 +1,8 @@
 use async_trait::async_trait;
 use core::any::Any;
-use log::error;
 use pingora::{
     cache::{
         key::CompactCacheKey,
-        storage::{HandleHit, HandleMiss},
         trace::SpanHandle,
         CacheKey, CacheMeta, HitHandler, MissHandler, Storage,
     },
@@ -12,161 +10,13 @@ use pingora::{
 };
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, ErrorKind, Read, Seek, Write},
+    io::{self, ErrorKind, Read, Write},
     path::{Path, PathBuf},
 };
 
-fn perror<S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
-    context: S,
-    cause: E,
-) -> pingora::BError {
-    pingora::Error::because(pingora::ErrorType::InternalError, context, cause)
-}
-
-fn e_perror<T, S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
-    context: S,
-    cause: E,
-) -> Result<T> {
-    Err(perror(context, cause))
-}
-
-struct FileHitHandler {
-    fp: File,
-    read_size: usize,
-}
-
-impl FileHitHandler {
-    fn new(final_path: PathBuf, read_size: usize) -> Result<FileHitHandler> {
-        let fp = File::open(&final_path).map_err(|err| perror("error opening data file", err))?;
-        Ok(Self {
-            fp: fp,
-            read_size: read_size,
-        })
-    }
-}
-
-#[async_trait]
-impl HandleHit for FileHitHandler {
-    async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
-        let mut buf = vec![0; self.read_size];
-        match self.fp.read(&mut buf) {
-            Ok(n) => {
-                if n > 0 {
-                    let b = bytes::Bytes::from(buf);
-                    Ok(Some(b.slice(..n)))
-                } else {
-                    Ok(None)
-                }
-            }
-            Err(e) => e_perror("error reading from cache", e),
-        }
-    }
-
-    async fn finish(
-        self: Box<Self>,
-        _storage: &'static (dyn Storage + Sync),
-        _key: &CacheKey,
-        _trace: &SpanHandle,
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    fn can_seek(&self) -> bool {
-        true
-    }
-
-    fn seek(&mut self, start: usize, _end: Option<usize>) -> Result<()> {
-        if let Err(err) = self.fp.seek(std::io::SeekFrom::Start(start as u64)) {
-            return e_perror("error seeking in cache", err);
-        }
-        Ok(())
-    }
-
-    fn as_any(&self) -> &(dyn Any + Send + Sync) {
-        todo!("as_any")
-    }
-}
-
-struct FileMissHandler {
-    partial_path: PathBuf,
-    final_path: PathBuf,
-    meta_path: PathBuf,
-    fp: File,
-    written: usize,
-}
-
-impl FileMissHandler {
-    fn new(partial_path: PathBuf, final_path: PathBuf, meta_path: PathBuf) -> Result<Self> {
-        let fp = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&partial_path)
-            .map_err(|err| perror("error creating partial file", err))?;
-        Ok(Self {
-            partial_path,
-            final_path,
-            meta_path,
-            fp: fp,
-            written: 0,
-        })
-    }
-}
-
-#[async_trait]
-impl HandleMiss for FileMissHandler {
-    async fn write_body(&mut self, data: bytes::Bytes, _eof: bool) -> Result<()> {
-        match self.fp.write_all(&data) {
-            Ok(()) => {
-                self.written += data.len();
-                Ok(())
-            }
-            Err(err) => e_perror("error writing to cache", err),
-        }
-    }
-
-    async fn finish(self: Box<Self>) -> Result<usize> {
-        fs::rename(self.partial_path.as_path(), self.final_path.as_path())
-            .map_err(|err| perror("cannot rename partial to final", err))?;
-        Ok(self.written)
-    }
-}
-
-macro_rules! delete_file_error {
-    ($path:expr, $fmt:expr, $err:expr) => {
-        error!($fmt, $path.to_string_lossy(), $err)
-    };
-}
-
-macro_rules! delete_file {
-    ($path:expr, $fmt:expr) => {
-        if let Err(err) = fs::remove_file($path) {
-            delete_file_error!($path, $fmt, err)
-        }
-    };
-}
-
-impl Drop for FileMissHandler {
-    fn drop(&mut self) {
-        match fs::remove_file(&self.partial_path) {
-            // if the partial file is not found, no further action is needed
-            Err(err) if err.kind() == ErrorKind::NotFound => {}
-            // some other error occurred, try to also delete meta file
-            Err(err) => {
-                delete_file_error!(
-                    self.partial_path,
-                    "cannot remove unfinished partial file {}: {}",
-                    err
-                );
-                delete_file!(&self.meta_path, "cannot remove unfinished meta file {}: {}");
-            }
-            // if the partial file was deleted, we also need to remove the meta file
-            _ => {
-                delete_file!(&self.meta_path, "cannot remove unfinished meta file {}: {}");
-            }
-        }
-    }
-}
+use super::super::error::{e_perror, perror};
+use super::hithandler::FileHitHandler;
+use super::misshandler::FileMissHandler;
 
 #[derive(Debug)]
 pub struct FileStorage {
@@ -279,7 +129,9 @@ impl FileStorage {
         let err_data = fs::remove_file(&data_path);
         match (err_meta, err_data) {
             (Ok(()), Ok(())) => Ok(true),
-            (Err(e1), Ok(())) => e_perror("Failed to remove cachemeta {}", e1),
+            (Err(e1), Ok(())) => {
+                e_perror("Failed to remove cachemeta {}", e1)
+            }
             (Ok(()), Err(e2)) => e_perror(
                 format!("Failed to remove data file {}", data_path.display()),
                 e2,

@@ -1,6 +1,7 @@
 use pingora::prelude::*;
 
 mod defaults;
+mod error;
 mod flags;
 mod logger;
 mod proxy;
