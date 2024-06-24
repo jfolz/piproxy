@@ -219,25 +219,6 @@ impl FileStorage {
     }
 
     fn get_cachemeta(&'static self, key: &CompactCacheKey) -> Option<Result<CacheMeta>> {
-        /*
-        let cachekey = key.combined_bin();
-        let conn = self.conn.lock().unwrap();
-        let mut query = conn.prepare("SELECT internal, header FROM cachemeta WHERE cachekey = ?1").unwrap();
-        let row: std::result::Result<(Vec<u8>, Vec<u8>), rusqlite::Error> = query.query_row(
-            (&cachekey,),
-            |row| Ok((row.get(0)?, row.get(1)?))
-        );
-        match row {
-            Ok((internal, header)) => {
-                match CacheMeta::deserialize(&internal, &header) {
-                    Ok(meta) => return Some(Ok(meta)),
-                    Err(err) => return Some(Err(err)),
-                }
-            }
-            Err(rusqlite::Error::QueryReturnedNoRows) => return None,
-            Err(err) => return Some(e_perror("sqlite", err))
-        }
-        */
         let path = self.meta_path(key);
         match File::open(&path) {
             Ok(mut fp) => {
@@ -255,18 +236,6 @@ impl FileStorage {
     }
 
     fn put_cachemeta(&'static self, key: &CompactCacheKey, meta: &CacheMeta) -> Result<()> {
-        /*
-        let (internal, header) = meta.serialize()?;
-        let cachekey = key.combined_bin();
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO cachemeta VALUES (?1, ?2, ?3) 
-            ON CONFLICT DOUPDATE SET 
-            internal=excluded.internal, header=excluded.header",
-            (&cachekey, internal, header),
-        ).map_err(|err| perror("put cachemeta", err))?;
-        Ok(())
-        */
         let data = serialize_cachemeta(meta)?;
         let path = self.meta_path(key);
         let mut fp = OpenOptions::new().create(true).read(false).write(true).open(&path)
@@ -277,15 +246,6 @@ impl FileStorage {
     }
 
     fn pop_cachemeta(&'static self, key: &CompactCacheKey) -> Result<()> {
-        /*
-        let cachekey = key.combined_bin();
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM cachemeta WHERE cachekey = ?1",
-            (&cachekey,),
-        ).map_err(|err| perror("pop cachemeta", err))?;
-        Ok(())
-        */
         let path = self.meta_path(key);
         fs::remove_file(&path).map_err(|err| perror("pop cachemeta", err))?;
         Ok(())
