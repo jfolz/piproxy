@@ -173,7 +173,7 @@ impl Storage for FileStorage {
                 let partial_path = self.partial_data_path(&key);
                 let h: HitHandler;
                 if partial_path.exists() {
-                    h = Box::new(PartialFileHitHandler::new(final_path, partial_path, self.read_size).await?);
+                    h = Box::new(PartialFileHitHandler::new(partial_path, final_path, self.read_size).await?);
                 } else {
                     h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
                 }

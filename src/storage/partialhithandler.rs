@@ -7,7 +7,7 @@ use pingora::{
     prelude::*,
 };
 use std::{
-    io::{self, ErrorKind},
+    io::ErrorKind,
     path::PathBuf, time::Duration,
 };
 use tokio::{
@@ -20,18 +20,17 @@ use super::super::error::{e_perror, perror};
 
 pub struct PartialFileHitHandler {
     final_path: PathBuf,
-    partial_path: PathBuf,
     is_final: bool,
     fp: File,
-    read_size: usize,
+    buf: Vec<u8>,
 }
 
 impl PartialFileHitHandler {
-    pub async fn new(final_path: PathBuf, partial_path: PathBuf, read_size: usize) -> Result<Self> {
+    pub async fn new(partial_path: PathBuf, final_path: PathBuf, read_size: usize) -> Result<Self> {
         let mut is_final = false;
         let fp = match File::open(&partial_path).await {
             Ok(fp) => fp,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            Err(err) if err.kind() == ErrorKind::NotFound => {
                 // if partial file failed to open, try to open final file instead
                 is_final = true;
                 File::open(&final_path)
@@ -40,13 +39,8 @@ impl PartialFileHitHandler {
             }
             Err(err) => e_perror("error opening partial data file", err)?
         };
-        Ok(Self {
-            final_path,
-            partial_path,
-            is_final,
-            fp,
-            read_size,
-        })
+        let buf = vec![0; read_size];
+        Ok(Self{final_path, is_final, fp, buf})
     }
 
     fn is_done(&mut self) -> bool {
@@ -59,10 +53,9 @@ impl PartialFileHitHandler {
 impl HandleHit for PartialFileHitHandler {
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
         let dur = Duration::from_millis(50);
-        let mut buf = vec![0; self.read_size];
         loop {
             let final_before_read = self.is_done();
-            match timeout(dur, self.fp.read(&mut buf)).await {
+            match timeout(dur, self.fp.read(&mut self.buf)).await {
                 Ok(result) => {
                     match result {
                         Ok(n) => {
@@ -73,8 +66,8 @@ impl HandleHit for PartialFileHitHandler {
                             }
                             // we read something, so we can just return it
                             if n > 0 {
-                                let b = bytes::Bytes::from(buf);
-                                return Ok(Some(b.slice(..n)))
+                                let b = bytes::Bytes::from(self.buf[..n].to_owned());
+                                return Ok(Some(b))
                             }
                         }
                         Err(err) => {

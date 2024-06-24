@@ -16,7 +16,7 @@ use super::super::error::{e_perror, perror};
 
 pub struct FileHitHandler {
     fp: File,
-    read_size: usize,
+    buf: Vec<u8>,
 }
 
 impl FileHitHandler {
@@ -24,22 +24,19 @@ impl FileHitHandler {
         let fp = File::open(&final_path)
             .await
             .map_err(|err| perror("error opening data file", err))?;
-        Ok(Self {
-            fp: fp,
-            read_size: read_size,
-        })
+        let buf = vec![0; read_size];
+        Ok(Self{fp, buf})
     }
 }
 
 #[async_trait]
 impl HandleHit for FileHitHandler {
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
-        let mut buf = vec![0; self.read_size];
-        match self.fp.read(&mut buf).await {
+        match self.fp.read(&mut self.buf).await {
             Ok(n) => {
                 if n > 0 {
-                    let b = bytes::Bytes::from(buf);
-                    Ok(Some(b.slice(..n)))
+                    let b = bytes::Bytes::from(self.buf[..n].to_owned());
+                    Ok(Some(b))
                 } else {
                     Ok(None)
                 }
