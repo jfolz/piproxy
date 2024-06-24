@@ -37,8 +37,7 @@ struct FileHitHandler {
 
 impl FileHitHandler {
     fn new(final_path: PathBuf, read_size: usize) -> Result<FileHitHandler> {
-        let fp = File::open(&final_path)
-        .map_err(|err| perror("error opening data file", err))?;
+        let fp = File::open(&final_path).map_err(|err| perror("error opening data file", err))?;
         Ok(Self {
             fp: fp,
             read_size: read_size,
@@ -128,7 +127,7 @@ impl HandleMiss for FileMissHandler {
 
     async fn finish(self: Box<Self>) -> Result<usize> {
         fs::rename(self.partial_path.as_path(), self.final_path.as_path())
-        .map_err(|err| perror("cannot rename partial to final", err))?;
+            .map_err(|err| perror("cannot rename partial to final", err))?;
         Ok(self.written)
     }
 }
@@ -141,7 +140,9 @@ macro_rules! delete_file_error {
 
 macro_rules! delete_file {
     ($path:expr, $fmt:expr) => {
-        if let Err(err) = fs::remove_file($path) { delete_file_error!($path, $fmt, err) }
+        if let Err(err) = fs::remove_file($path) {
+            delete_file_error!($path, $fmt, err)
+        }
     };
 }
 
@@ -149,10 +150,14 @@ impl Drop for FileMissHandler {
     fn drop(&mut self) {
         match fs::remove_file(&self.partial_path) {
             // if the partial file is not found, no further action is needed
-            Err(err) if err.kind() == ErrorKind::NotFound => {},
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
             // some other error occurred, try to also delete meta file
             Err(err) => {
-                delete_file_error!(self.partial_path, "cannot remove unfinished partial file {}: {}", err);
+                delete_file_error!(
+                    self.partial_path,
+                    "cannot remove unfinished partial file {}: {}",
+                    err
+                );
                 delete_file!(&self.meta_path, "cannot remove unfinished meta file {}: {}");
             }
             // if the partial file was deleted, we also need to remove the meta file
@@ -312,7 +317,7 @@ impl Storage for FileStorage {
         let key = key.to_compact();
         // don't return hit if data is partial file
         if self.partial_data_path(&key).exists() {
-            return Ok(None)
+            return Ok(None);
         }
         match self.get_cachemeta(&key) {
             Some(Ok(meta)) => {

@@ -40,8 +40,6 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, ch
     STORAGE.set(storage).unwrap();
 
     let manager = Manager::new(cache_size);
-    // TODO save and load manager state
-    //manager.load(flags.get_cache_path().to_str().unwrap());
     if let Err(_) = EVICTION.set(manager) {
         panic!("eviction manager already set");
     }
