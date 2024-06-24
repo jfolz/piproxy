@@ -52,8 +52,14 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, ch
     }
 }
 
-fn has_extension(entry: &DirEntry, ext: &str) -> bool {
-    entry.path().extension().is_some_and(|found| found == ext)
+fn has_extension<'a, I>(entry: &DirEntry, exts: I) -> bool
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    entry
+        .path()
+        .extension()
+        .is_some_and(|found| exts.into_iter().any(|ext| found == ext))
 }
 
 fn key_from_entry(entry: &DirEntry) -> io::Result<CompactCacheKey> {
@@ -81,7 +87,7 @@ pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
                 let entry = entry?;
                 if entry.file_type()?.is_dir() {
                     todo.push(entry.path());
-                } else if !has_extension(&entry, "meta") {
+                } else if !has_extension(&entry, ["meta", "partial"]) {
                     let metadata = entry.metadata()?;
                     let key = key_from_entry(&entry)?;
                     let size = metadata.size() as usize;
