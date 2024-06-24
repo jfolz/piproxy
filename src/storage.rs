@@ -176,7 +176,7 @@ fn path_from_key(dir: &PathBuf, key: &CompactCacheKey, suffix: &str) -> PathBuf 
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct CacheMetaData<'a>{
+struct CacheMetaData<'a> {
     #[serde(with = "serde_bytes")]
     internal: &'a [u8],
     #[serde(with = "serde_bytes")]
@@ -186,9 +186,11 @@ struct CacheMetaData<'a>{
 fn serialize_cachemeta(meta: &CacheMeta) -> Result<Vec<u8>> {
     match meta.serialize() {
         Ok((internal, header)) => {
-            let wrapper = CacheMetaData{ internal: &internal, header: &header };
-            rmp_serde::to_vec(&wrapper)
-            .map_err(|err| perror("cannot serialize cachemeta", err))
+            let wrapper = CacheMetaData {
+                internal: &internal,
+                header: &header,
+            };
+            rmp_serde::to_vec(&wrapper).map_err(|err| perror("cannot serialize cachemeta", err))
         }
         Err(err) => Err(err),
     }
@@ -198,7 +200,7 @@ fn deserialize_cachemeta(data: &[u8]) -> Result<CacheMeta> {
     //assert_eq!((42, "the Answer"), );
     match rmp_serde::from_slice::<CacheMetaData>(&data) {
         Ok(cmd) => CacheMeta::deserialize(cmd.internal, cmd.header),
-        Err(err) => e_perror("cannot deserialize cachemeta", err)
+        Err(err) => e_perror("cannot deserialize cachemeta", err),
     }
 }
 
@@ -207,7 +209,10 @@ impl FileStorage {
         if !path.exists() {
             fs::create_dir_all(&path)?;
         }
-        Ok(Self { path: path, read_size: read_size })
+        Ok(Self {
+            path: path,
+            read_size: read_size,
+        })
     }
 
     fn data_path(&'static self, key: &CompactCacheKey) -> PathBuf {
@@ -225,12 +230,15 @@ impl FileStorage {
                 let mut data = Vec::new();
                 match fp.read_to_end(&mut data) {
                     Ok(_) => Some(deserialize_cachemeta(&data)),
-                    Err(err) => Some(e_perror("error reading cachemeta", err))
+                    Err(err) => Some(e_perror("error reading cachemeta", err)),
                 }
             }
             Err(err) => {
-                if err.kind() == ErrorKind::NotFound { None }
-                else { Some(e_perror("error opening cachemeta", err)) }
+                if err.kind() == ErrorKind::NotFound {
+                    None
+                } else {
+                    Some(e_perror("error opening cachemeta", err))
+                }
             }
         }
     }
@@ -238,7 +246,11 @@ impl FileStorage {
     fn put_cachemeta(&'static self, key: &CompactCacheKey, meta: &CacheMeta) -> Result<()> {
         let data = serialize_cachemeta(meta)?;
         let path = self.meta_path(key);
-        let mut fp = OpenOptions::new().create(true).read(false).write(true).open(&path)
+        let mut fp = OpenOptions::new()
+            .create(true)
+            .read(false)
+            .write(true)
+            .open(&path)
             .map_err(|err| perror("error opening file", err))?;
         fp.write_all(&data)
             .map_err(|err| perror("error writing to file", err))?;
@@ -257,10 +269,7 @@ impl FileStorage {
         let err_data = fs::remove_file(&data_path);
         match (err_meta, err_data) {
             (Ok(()), Ok(())) => Ok(true),
-            (Err(e1), Ok(())) => e_perror(
-                "Failed to remove cachemeta {}",
-                e1,
-            ),
+            (Err(e1), Ok(())) => e_perror("Failed to remove cachemeta {}", e1),
             (Ok(()), Err(e2)) => e_perror(
                 format!("Failed to remove data file {}", data_path.display()),
                 e2,
@@ -299,12 +308,8 @@ impl Storage for FileStorage {
             Some(Ok(meta)) => {
                 let data_path = self.data_path(&key.to_compact());
                 match File::open(&data_path) {
-                    Ok(fp) => {
-                        Ok(Some((meta, FileHitHandler::new_box(fp, self.read_size))))
-                    }
-                    Err(err) => {
-                        e_perror("error accessing cached data", err)
-                    }
+                    Ok(fp) => Ok(Some((meta, FileHitHandler::new_box(fp, self.read_size)))),
+                    Err(err) => e_perror("error accessing cached data", err),
                 }
             }
             Some(Err(err)) => Err(err),
@@ -323,7 +328,12 @@ impl Storage for FileStorage {
         let data_path = self.data_path(&key.to_compact());
         ensure_parent_dirs_exist(&data_path)?;
 
-        match OpenOptions::new().create(true).read(true).write(true).open(&data_path) {
+        match OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&data_path)
+        {
             Ok(fp) => Ok(FileMissHandler::new_box(data_path, fp)),
             Err(err) => e_perror("error opening cache", err),
         }

@@ -3,12 +3,22 @@ use bstr::Finder;
 use once_cell::sync::OnceCell;
 use pingora::{
     cache::{
-        cache_control::{CacheControl, InterpretCacheControl}, eviction::{simple_lru::Manager, EvictionManager}, key::CompactCacheKey, lock::CacheLock, CacheMeta, NoCacheReason, RespCacheable,
+        cache_control::{CacheControl, InterpretCacheControl},
+        eviction::{simple_lru::Manager, EvictionManager},
+        key::CompactCacheKey,
+        lock::CacheLock,
+        CacheMeta, NoCacheReason, RespCacheable,
     },
     http::{ResponseHeader, StatusCode},
     prelude::*,
 };
-use std::{any::{Any, TypeId}, fs::{self, DirEntry}, io::{self, ErrorKind}, os::unix::fs::MetadataExt, str};
+use std::{
+    any::{Any, TypeId},
+    fs::{self, DirEntry},
+    io::{self, ErrorKind},
+    os::unix::fs::MetadataExt,
+    str,
+};
 use std::{
     path::PathBuf,
     time::{Duration, SystemTime},
@@ -50,10 +60,9 @@ fn key_from_entry(entry: &DirEntry) -> io::Result<CompactCacheKey> {
     let filename = entry.file_name();
     let data = filename.as_encoded_bytes();
     assert_eq!(data.len() % 2, 0, "path has odd length {:?}", filename);
-    let ser: Vec<u8> = const_hex::decode(data)
-    .map_err(|err| io::Error::new(ErrorKind::UnexpectedEof, err))?;
-    rmp_serde::from_slice(&ser)
-    .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
+    let ser: Vec<u8> =
+        const_hex::decode(data).map_err(|err| io::Error::new(ErrorKind::UnexpectedEof, err))?;
+    rmp_serde::from_slice(&ser).map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
 }
 
 pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
@@ -61,7 +70,10 @@ pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
     let storage = STORAGE.get().unwrap();
     let mut todo = vec![cache_dir.clone()];
     // simple_lru manager does not use fresh_until, make sure this is actually simple_lru
-    assert_eq!(manager.type_id(), TypeId::of::<pingora::cache::eviction::simple_lru::Manager>());
+    assert_eq!(
+        manager.type_id(),
+        TypeId::of::<pingora::cache::eviction::simple_lru::Manager>()
+    );
     let fresh_until = SystemTime::now() + Duration::from_secs(356_000_000);
     loop {
         if let Some(next) = todo.pop() {
@@ -69,20 +81,19 @@ pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
                 let entry = entry?;
                 if entry.file_type()?.is_dir() {
                     todo.push(entry.path());
-                }
-                else if !has_extension(&entry, "meta") {
+                } else if !has_extension(&entry, "meta") {
                     let metadata = entry.metadata()?;
                     let key = key_from_entry(&entry)?;
                     let size = metadata.size() as usize;
                     for key in manager.admit(key, size, fresh_until) {
-                        storage.purge_sync(&key)
-                        .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
+                        storage
+                            .purge_sync(&key)
+                            .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
                     }
                 }
             }
-        }
-        else {
-            break
+        } else {
+            break;
         }
     }
     Ok(())
@@ -271,15 +282,18 @@ impl ProxyHttp for PyPIProxy<'_> {
                     let created = now - age;
                     let revalidate_sec = control.serve_stale_while_revalidate_sec().unwrap_or(60);
                     let error_sec = control.serve_stale_if_error_sec().unwrap_or(60);
-                    let meta = CacheMeta::new(fresh_until, created, revalidate_sec, error_sec, resp.clone());
+                    let meta = CacheMeta::new(
+                        fresh_until,
+                        created,
+                        revalidate_sec,
+                        error_sec,
+                        resp.clone(),
+                    );
                     Ok(RespCacheable::Cacheable(meta))
-                },
-                Cacheable::No => {
-                    Ok(RespCacheable::Uncacheable(NoCacheReason::OriginNotCache))
-                },
+                }
+                Cacheable::No => Ok(RespCacheable::Uncacheable(NoCacheReason::OriginNotCache)),
             }
-        }
-        else {
+        } else {
             Ok(RespCacheable::Uncacheable(NoCacheReason::OriginNotCache))
         }
     }
