@@ -18,6 +18,7 @@ pub struct PartialFileHitHandler {
     is_final: bool,
     fp: File,
     buf: Vec<u8>,
+    read_timeout: Duration,
 }
 
 impl PartialFileHitHandler {
@@ -35,11 +36,13 @@ impl PartialFileHitHandler {
             Err(err) => e_perror("error opening partial data file", err)?,
         };
         let buf = vec![0; read_size];
+        let read_timeout = Duration::from_millis(100);
         Ok(Self {
             final_path,
             is_final,
             fp,
             buf,
+            read_timeout,
         })
     }
 
@@ -52,10 +55,9 @@ impl PartialFileHitHandler {
 #[async_trait]
 impl HandleHit for PartialFileHitHandler {
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
-        let dur = Duration::from_millis(50);
         loop {
             let final_before_read = self.is_done();
-            match timeout(dur, self.fp.read(&mut self.buf)).await {
+            match timeout(self.read_timeout, self.fp.read(&mut self.buf)).await {
                 Ok(result) => {
                     match result {
                         Ok(n) => {
