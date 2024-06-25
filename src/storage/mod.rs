@@ -1,6 +1,6 @@
-mod hithandler;
-mod partialhithandler;
-mod misshandler;
 mod filestorage;
+mod hithandler;
+mod misshandler;
+mod partialhithandler;
 
 pub use filestorage::FileStorage;

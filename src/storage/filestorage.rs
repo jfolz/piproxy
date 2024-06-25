@@ -2,9 +2,8 @@ use async_trait::async_trait;
 use core::any::Any;
 use pingora::{
     cache::{
-        key::CompactCacheKey,
-        trace::SpanHandle,
-        CacheKey, CacheMeta, HitHandler, MissHandler, Storage,
+        key::CompactCacheKey, trace::SpanHandle, CacheKey, CacheMeta, HitHandler, MissHandler,
+        Storage,
     },
     prelude::*,
 };
@@ -14,9 +13,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{super::error::{e_perror, perror}, partialhithandler::PartialFileHitHandler};
 use super::hithandler::FileHitHandler;
 use super::misshandler::FileMissHandler;
+use super::{
+    super::error::{e_perror, perror},
+    partialhithandler::PartialFileHitHandler,
+};
 
 #[derive(Debug)]
 pub struct FileStorage {
@@ -129,9 +131,7 @@ impl FileStorage {
         let err_data = fs::remove_file(&data_path);
         match (err_meta, err_data) {
             (Ok(()), Ok(())) => Ok(true),
-            (Err(e1), Ok(())) => {
-                e_perror("Failed to remove cachemeta {}", e1)
-            }
+            (Err(e1), Ok(())) => e_perror("Failed to remove cachemeta {}", e1),
             (Ok(()), Err(e2)) => e_perror(
                 format!("Failed to remove data file {}", data_path.display()),
                 e2,
@@ -173,7 +173,10 @@ impl Storage for FileStorage {
                 let partial_path = self.partial_data_path(&key);
                 let h: HitHandler;
                 if partial_path.exists() {
-                    h = Box::new(PartialFileHitHandler::new(partial_path, final_path, self.read_size).await?);
+                    h = Box::new(
+                        PartialFileHitHandler::new(partial_path, final_path, self.read_size)
+                            .await?,
+                    );
                 } else {
                     h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
                 }

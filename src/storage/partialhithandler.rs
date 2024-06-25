@@ -1,15 +1,10 @@
 use async_trait::async_trait;
 use core::any::Any;
 use pingora::{
-    cache::{
-        storage::HandleHit, trace::SpanHandle, CacheKey, Storage
-    },
+    cache::{storage::HandleHit, trace::SpanHandle, CacheKey, Storage},
     prelude::*,
 };
-use std::{
-    io::ErrorKind,
-    path::PathBuf, time::Duration,
-};
+use std::{io::ErrorKind, path::PathBuf, time::Duration};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncSeekExt},
@@ -34,13 +29,18 @@ impl PartialFileHitHandler {
                 // if partial file failed to open, try to open final file instead
                 is_final = true;
                 File::open(&final_path)
-                .await
-                .map_err(|err| perror("error opening data file", err))?
+                    .await
+                    .map_err(|err| perror("error opening data file", err))?
             }
-            Err(err) => e_perror("error opening partial data file", err)?
+            Err(err) => e_perror("error opening partial data file", err)?,
         };
         let buf = vec![0; read_size];
-        Ok(Self{final_path, is_final, fp, buf})
+        Ok(Self {
+            final_path,
+            is_final,
+            fp,
+            buf,
+        })
     }
 
     fn is_done(&mut self) -> bool {
@@ -62,24 +62,22 @@ impl HandleHit for PartialFileHitHandler {
                             // we saw writing was done, then read nothing,
                             // so we know the file has been read completely
                             if n == 0 && final_before_read {
-                                return Ok(None)
+                                return Ok(None);
                             }
                             // we read something, so we can just return it
                             if n > 0 {
                                 let b = bytes::Bytes::from(self.buf[..n].to_owned());
-                                return Ok(Some(b))
+                                return Ok(Some(b));
                             }
                         }
-                        Err(err) => {
-                            return e_perror("error reading from cache", err)
-                        }
+                        Err(err) => return e_perror("error reading from cache", err),
                     }
                 }
                 Err(_) => {
                     // we saw writing was done, then read timed out,
                     // so we know the file has been read completely
                     if final_before_read {
-                        return Ok(None)
+                        return Ok(None);
                     }
                 }
             }
@@ -101,10 +99,11 @@ impl HandleHit for PartialFileHitHandler {
 
     fn seek(&mut self, start: usize, _end: Option<usize>) -> Result<()> {
         tokio::runtime::Handle::current().block_on(async {
-            self.fp.seek(std::io::SeekFrom::Start(start as u64))
-            .await
-            .map_err(|err| perror("error seeking in cache", err))
-            .map(|_| ())
+            self.fp
+                .seek(std::io::SeekFrom::Start(start as u64))
+                .await
+                .map_err(|err| perror("error seeking in cache", err))
+                .map(|_| ())
         })
     }
 

@@ -1,8 +1,4 @@
-use pingora::{
-    ErrorTrait,
-    ImmutStr, 
-    prelude::*,
-};
+use pingora::{prelude::*, ErrorTrait, ImmutStr};
 
 pub fn perror<S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
     context: S,

@@ -1,13 +1,7 @@
 use async_trait::async_trait;
 use log::error;
-use pingora::{
-    cache::storage::HandleMiss,
-    prelude::*,
-};
-use std::{
-    io::ErrorKind,
-    path::PathBuf,
-};
+use pingora::{cache::storage::HandleMiss, prelude::*};
+use std::{io::ErrorKind, path::PathBuf};
 use tokio::{
     fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
@@ -24,7 +18,11 @@ pub struct FileMissHandler {
 }
 
 impl FileMissHandler {
-    pub async fn new(partial_path: PathBuf, final_path: PathBuf, meta_path: PathBuf) -> Result<Self> {
+    pub async fn new(
+        partial_path: PathBuf,
+        final_path: PathBuf,
+        meta_path: PathBuf,
+    ) -> Result<Self> {
         let fp = OpenOptions::new()
             .create(true)
             .read(true)
@@ -100,6 +98,6 @@ impl Drop for FileMissHandler {
     fn drop(&mut self) {
         let partial_path = self.partial_path.clone();
         let meta_path = self.meta_path.clone();
-        tokio::task::spawn(async move { cleanup(partial_path, meta_path)});
+        tokio::task::spawn(async move { cleanup(partial_path, meta_path) });
     }
 }

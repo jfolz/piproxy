@@ -1,9 +1,7 @@
 use async_trait::async_trait;
 use core::any::Any;
 use pingora::{
-    cache::{
-        storage::HandleHit, trace::SpanHandle, CacheKey, Storage
-    },
+    cache::{storage::HandleHit, trace::SpanHandle, CacheKey, Storage},
     prelude::*,
 };
 use std::path::PathBuf;
@@ -25,7 +23,7 @@ impl FileHitHandler {
             .await
             .map_err(|err| perror("error opening data file", err))?;
         let buf = vec![0; read_size];
-        Ok(Self{fp, buf})
+        Ok(Self { fp, buf })
     }
 }
 
@@ -60,10 +58,11 @@ impl HandleHit for FileHitHandler {
 
     fn seek(&mut self, start: usize, _end: Option<usize>) -> Result<()> {
         tokio::runtime::Handle::current().block_on(async {
-            self.fp.seek(std::io::SeekFrom::Start(start as u64))
-            .await
-            .map_err(|err| perror("error seeking in cache", err))
-            .map(|_| ())
+            self.fp
+                .seek(std::io::SeekFrom::Start(start as u64))
+                .await
+                .map_err(|err| perror("error seeking in cache", err))
+                .map(|_| ())
         })
     }
 
