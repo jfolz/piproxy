@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bytes::BytesMut;
 use core::any::Any;
 use pingora::{
     cache::{storage::HandleHit, trace::SpanHandle, CacheKey, Storage},
@@ -17,7 +18,7 @@ pub struct PartialFileHitHandler {
     final_path: PathBuf,
     is_final: bool,
     fp: File,
-    buf: Vec<u8>,
+    read_size: usize,
     read_timeout: Duration,
 }
 
@@ -35,13 +36,12 @@ impl PartialFileHitHandler {
             }
             Err(err) => e_perror("error opening partial data file", err)?,
         };
-        let buf = vec![0; read_size];
         let read_timeout = Duration::from_millis(100);
         Ok(Self {
             final_path,
             is_final,
             fp,
-            buf,
+            read_size,
             read_timeout,
         })
     }
@@ -57,7 +57,8 @@ impl HandleHit for PartialFileHitHandler {
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
         loop {
             let final_before_read = self.is_done();
-            match timeout(self.read_timeout, self.fp.read(&mut self.buf)).await {
+            let mut buf = BytesMut::zeroed(self.read_size);
+            match timeout(self.read_timeout, self.fp.read(buf.as_mut())).await {
                 Ok(result) => {
                     match result {
                         Ok(n) => {
@@ -68,8 +69,8 @@ impl HandleHit for PartialFileHitHandler {
                             }
                             // we read something, so we can just return it
                             if n > 0 {
-                                let b = bytes::Bytes::from(self.buf[..n].to_owned());
-                                return Ok(Some(b));
+                                let buf = buf.freeze();
+                                return Ok(Some(buf.slice(..n)))
                             }
                         }
                         Err(err) => return e_perror("error reading from cache", err),

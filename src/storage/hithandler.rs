@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bytes::BytesMut;
 use core::any::Any;
 use pingora::{
     cache::{storage::HandleHit, trace::SpanHandle, CacheKey, Storage},
@@ -14,7 +15,7 @@ use super::super::error::{e_perror, perror};
 
 pub struct FileHitHandler {
     fp: File,
-    buf: Vec<u8>,
+    read_size: usize,
 }
 
 impl FileHitHandler {
@@ -22,19 +23,19 @@ impl FileHitHandler {
         let fp = File::open(&final_path)
             .await
             .map_err(|err| perror("error opening data file", err))?;
-        let buf = vec![0; read_size];
-        Ok(Self { fp, buf })
+        Ok(Self { fp, read_size })
     }
 }
 
 #[async_trait]
 impl HandleHit for FileHitHandler {
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
-        match self.fp.read(&mut self.buf).await {
+        let mut buf = BytesMut::zeroed(self.read_size);
+        match self.fp.read(buf.as_mut()).await {
             Ok(n) => {
                 if n > 0 {
-                    let b = bytes::Bytes::from(self.buf[..n].to_owned());
-                    Ok(Some(b))
+                    let buf = buf.freeze();
+                    Ok(Some(buf.slice(..n)))
                 } else {
                     Ok(None)
                 }

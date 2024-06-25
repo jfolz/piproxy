@@ -20,6 +20,10 @@ timeout-readwrite = "0.3.3"
 tokio = { version = "1", features = ["rt", "fs", "time"] }
 xflags = "0.3.2"
 
+[profile.profiling]
+inherits = "release"
+debug = true
+
 [profile.release-min]
 inherits = "release"
 strip = true      # Automatically strip symbols from the binary.
