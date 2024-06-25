@@ -14,7 +14,6 @@ use pingora::{
 };
 use std::{
     any::{Any, TypeId},
-    fmt::Debug,
     fs::{self, DirEntry},
     io::{self, ErrorKind},
     os::unix::fs::MetadataExt,
