@@ -72,7 +72,11 @@ fn is_entry(entry: &DirEntry) -> bool {
 }
 
 fn key_from_entry(entry: &DirEntry) -> io::Result<CompactCacheKey> {
-    let filename = entry.file_name();
+    let path = entry.path();
+    let filename = path.file_stem().ok_or(io::Error::new(
+        ErrorKind::InvalidData,
+        "given entry is not a data file",
+    ))?;
     let data = filename.as_encoded_bytes();
     assert_eq!(data.len() % 2, 0, "path has odd length {:?}", filename);
     let ser: Vec<u8> =
@@ -87,7 +91,6 @@ enum ParseResult {
     Entry(Admission),
     None,
     Warning(io::Error),
-    Err(io::Error),
 }
 
 fn parse_entry(entry: DirEntry) -> io::Result<Admission> {
@@ -160,7 +163,6 @@ pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
                 }
                 ParseResult::None => continue,
                 ParseResult::Warning(err) => log::warn!("could not parse cache entry: {}", err),
-                ParseResult::Err(err) => return Err(err),
             }
         }
     }

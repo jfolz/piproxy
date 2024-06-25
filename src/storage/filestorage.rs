@@ -74,14 +74,17 @@ impl FileStorage {
     }
 
     fn final_data_path(&'static self, key: &CompactCacheKey) -> Result<PathBuf> {
-        path_from_key(&self.path, key, "")
+        // TODO encode .data in type system?
+        path_from_key(&self.path, key, ".data")
     }
 
     fn partial_data_path(&'static self, key: &CompactCacheKey) -> Result<PathBuf> {
+        // TODO encode .partial in type system?
         path_from_key(&self.path, key, ".partial")
     }
 
     fn meta_path(&'static self, key: &CompactCacheKey) -> Result<PathBuf> {
+        // TODO encode .meta in type system?
         path_from_key(&self.path, key, ".meta")
     }
 
