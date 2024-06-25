@@ -53,6 +53,9 @@ impl HandleMiss for FileMissHandler {
     }
 
     async fn finish(self: Box<Self>) -> Result<usize> {
+        self.fp.sync_all()
+            .await
+            .map_err(|err| perror("cannot sync partial file", err))?;
         fs::rename(self.partial_path.as_path(), self.final_path.as_path())
             .await
             .map_err(|err| perror("cannot rename partial to final", err))?;
