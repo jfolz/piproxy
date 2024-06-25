@@ -13,11 +13,7 @@ use pingora::{
     prelude::*,
 };
 use std::{
-    any::{Any, TypeId},
-    fs::{self, DirEntry},
-    io::{self, ErrorKind},
-    os::unix::fs::MetadataExt,
-    str,
+    any::{Any, TypeId}, fmt::Debug, fs::{self, DirEntry}, io::{self, ErrorKind}, os::unix::fs::MetadataExt, str
 };
 use std::{
     path::PathBuf,
@@ -36,8 +32,15 @@ const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
 pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, chunk_size: usize) {
-    let storage = storage::FileStorage::new(cache_path, chunk_size).unwrap();
-    STORAGE.set(storage).unwrap();
+    let storage = match storage::FileStorage::new(cache_path, chunk_size) {
+        Ok(storage) => storage,
+        Err(err) => {
+            panic!("cannot create cache storage: {}", err);
+        }
+    };
+    if let Err(_) = STORAGE.set(storage) {
+        panic!("storage already set");
+    }
 
     let manager = Manager::new(cache_size);
     if let Err(_) = EVICTION.set(manager) {
@@ -60,6 +63,10 @@ where
         .is_some_and(|found| exts.into_iter().any(|ext| found == ext))
 }
 
+fn is_entry(entry: &DirEntry) -> bool {
+    has_extension(entry, [".data"])
+}
+
 fn key_from_entry(entry: &DirEntry) -> io::Result<CompactCacheKey> {
     let filename = entry.file_name();
     let data = filename.as_encoded_bytes();
@@ -69,9 +76,49 @@ fn key_from_entry(entry: &DirEntry) -> io::Result<CompactCacheKey> {
     rmp_serde::from_slice(&ser).map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
 }
 
+type Admission = (CompactCacheKey, usize);
+
+enum ParseResult {
+    Dir(PathBuf),
+    Entry(Admission),
+    None,
+    Warning(io::Error),
+    Err(io::Error),
+}
+
+fn parse_entry(entry: DirEntry) -> io::Result<Admission> {
+    let metadata = entry.metadata()?;
+    let key = key_from_entry(&entry)?;
+    let size = metadata.size() as usize;
+    Ok((key, size))
+}
+
+fn parse_entry_checked(entry: io::Result<DirEntry>) -> ParseResult {
+    let entry = match entry {
+        Ok(entry) => entry,
+        Err(err) => return ParseResult::Warning(err),
+    };
+    let ftype = match entry.file_type() {
+        Ok(ftype) => ftype,
+        Err(err) => return ParseResult::Warning(err),
+    };
+    if ftype.is_dir() {
+        ParseResult::Dir(entry.path())
+    } else if is_entry(&entry) {
+        match parse_entry(entry) {
+            Ok(entry) => ParseResult::Entry(entry),
+            Err(err) => ParseResult::Warning(err),
+        }
+    } else {
+        ParseResult::None
+    }
+}
+
 pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
-    let manager = EVICTION.get().unwrap();
-    let storage = STORAGE.get().unwrap();
+    let manager = EVICTION.get()
+    .ok_or(io::Error::new(ErrorKind::Other, "eviction manager not set"))?;
+    let storage = STORAGE.get()
+    .ok_or(io::Error::new(ErrorKind::Other, "cache storage not set"))?;
     let mut todo = vec![cache_dir.clone()];
     // simple_lru manager does not use fresh_until, make sure this is actually simple_lru
     assert_eq!(
@@ -80,24 +127,31 @@ pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
     );
     let fresh_until = SystemTime::now() + Duration::from_secs(356_000_000);
     loop {
-        if let Some(next) = todo.pop() {
-            for entry in fs::read_dir(next)? {
-                let entry = entry?;
-                if entry.file_type()?.is_dir() {
-                    todo.push(entry.path());
-                } else if !has_extension(&entry, ["meta", "partial"]) {
-                    let metadata = entry.metadata()?;
-                    let key = key_from_entry(&entry)?;
-                    let size = metadata.size() as usize;
+        let next = match todo.pop() {
+            Some(next) => next,
+            None => break,
+        };
+        let entries = match fs::read_dir(&next) {
+            Ok(entries) => entries,
+            Err(err) => {
+                log::error!("could not list directory {}: {}", next.to_string_lossy(), err);
+                continue;
+            }
+        };
+        for entry in entries {
+            match parse_entry_checked(entry) {
+                ParseResult::Dir(path) => todo.push(path),
+                ParseResult::Entry((key, size)) => {
                     for key in manager.admit(key, size, fresh_until) {
                         storage
                             .purge_sync(&key)
                             .map_err(|err| io::Error::new(ErrorKind::Other, err))?;
                     }
                 }
+                ParseResult::None => continue,
+                ParseResult::Warning(err) => log::warn!("could not parse cache entry: {}", err),
+                ParseResult::Err(err) => return Err(err),
             }
-        } else {
-            break;
         }
     }
     Ok(())
@@ -186,12 +240,11 @@ impl ProxyHttp for PyPIProxy<'_> {
         // for packages use files.pythonhosted.org
         if request_path(session).starts_with(b"/packages/") {
             upstream_request
-                .insert_header("Host", FILES_PYTHONHOSTED_ORG)
-                .unwrap();
+                .insert_header("Host", FILES_PYTHONHOSTED_ORG)?;
         }
         // otherwise pypi.org
         else {
-            upstream_request.insert_header("Host", PYPI_ORG).unwrap();
+            upstream_request.insert_header("Host", PYPI_ORG)?;
         }
         // server should not compress response
         upstream_request.remove_header("Accept-Encoding");
@@ -249,11 +302,16 @@ impl ProxyHttp for PyPIProxy<'_> {
     }
 
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
+        let storage = match STORAGE.get() {
+            Some(storage) => storage,
+            None => return Ok(()),
+        };
+        type EvictorRef = &'static (dyn pingora::cache::eviction::EvictionManager + Sync);
         session.cache.enable(
             // storage: the cache storage backend that implements storage::Storage
-            STORAGE.get().unwrap(),
+            storage,
             // eviction: optionally the eviction manager, without it, nothing will be evicted from the storage
-            Some(EVICTION.get().unwrap()),
+            EVICTION.get().map(|v| v as EvictorRef),
             // predictor: optionally a cache predictor. The cache predictor predicts whether something is likely to be cacheable or not.
             //            This is useful because the proxy can apply different types of optimization to cacheable and uncacheable requests.
             None,
