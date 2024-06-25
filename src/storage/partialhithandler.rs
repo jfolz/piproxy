@@ -70,7 +70,7 @@ impl HandleHit for PartialFileHitHandler {
                             // we read something, so we can just return it
                             if n > 0 {
                                 let buf = buf.freeze();
-                                return Ok(Some(buf.slice(..n)))
+                                return Ok(Some(buf.slice(..n)));
                             }
                         }
                         Err(err) => return e_perror("error reading from cache", err),

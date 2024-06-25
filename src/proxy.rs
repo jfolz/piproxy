@@ -13,7 +13,12 @@ use pingora::{
     prelude::*,
 };
 use std::{
-    any::{Any, TypeId}, fmt::Debug, fs::{self, DirEntry}, io::{self, ErrorKind}, os::unix::fs::MetadataExt, str
+    any::{Any, TypeId},
+    fmt::Debug,
+    fs::{self, DirEntry},
+    io::{self, ErrorKind},
+    os::unix::fs::MetadataExt,
+    str,
 };
 use std::{
     path::PathBuf,
@@ -115,10 +120,12 @@ fn parse_entry_checked(entry: io::Result<DirEntry>) -> ParseResult {
 }
 
 pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
-    let manager = EVICTION.get()
-    .ok_or(io::Error::new(ErrorKind::Other, "eviction manager not set"))?;
-    let storage = STORAGE.get()
-    .ok_or(io::Error::new(ErrorKind::Other, "cache storage not set"))?;
+    let manager = EVICTION
+        .get()
+        .ok_or(io::Error::new(ErrorKind::Other, "eviction manager not set"))?;
+    let storage = STORAGE
+        .get()
+        .ok_or(io::Error::new(ErrorKind::Other, "cache storage not set"))?;
     let mut todo = vec![cache_dir.clone()];
     // simple_lru manager does not use fresh_until, make sure this is actually simple_lru
     assert_eq!(
@@ -134,7 +141,11 @@ pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
         let entries = match fs::read_dir(&next) {
             Ok(entries) => entries,
             Err(err) => {
-                log::error!("could not list directory {}: {}", next.to_string_lossy(), err);
+                log::error!(
+                    "could not list directory {}: {}",
+                    next.to_string_lossy(),
+                    err
+                );
                 continue;
             }
         };
@@ -239,8 +250,7 @@ impl ProxyHttp for PyPIProxy<'_> {
     ) -> Result<()> {
         // for packages use files.pythonhosted.org
         if request_path(session).starts_with(b"/packages/") {
-            upstream_request
-                .insert_header("Host", FILES_PYTHONHOSTED_ORG)?;
+            upstream_request.insert_header("Host", FILES_PYTHONHOSTED_ORG)?;
         }
         // otherwise pypi.org
         else {
