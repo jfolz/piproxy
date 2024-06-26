@@ -5,6 +5,7 @@ rust:
   stage: build
   image: rust:slim
   script:
+    - apt-get install pkg-config libssl-dev
     - cargo build --verbose --release
     - cargo test --verbose --release
   artifacts:
