@@ -1,4 +1,6 @@
-use crate::defaults::*;
+use crate::defaults::{
+    DEFAULT_CACHE_SIZE, DEFAULT_CACHE_TIMEOUT, DEFAULT_READ_SIZE, DEFAULT_LOG_LEVEL,
+};
 use log::LevelFilter;
 use std::path::PathBuf;
 use std::str;
@@ -11,10 +13,9 @@ impl FromStr for Unit {
     type Err = parse_size::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        parse_size::Config::new()
-            .with_binary()
-            .parse_size(s)
-            .map(|v| Self(v as usize))
+        let v = parse_size::Config::new().with_binary().parse_size(s)?;
+        let v = usize::try_from(v).map_err(|_| Self::Err::PosOverflow)?;
+        Ok(Self(v))
     }
 }
 
@@ -32,13 +33,13 @@ xflags::xflags! {
         optional -a,--address address: String
         /// Path where cached files are stored
         optional -p,--cache-path cache_path: PathBuf
-        /// Path where cached files are stored
+        /// Maximum size of the cache
         optional -s,--cache-size cache_size: Unit
-        /// Path where cached files are stored
-        optional -r,--chunk-size chunk_size: Unit
+        /// Read size when reading from cache
+        optional -r,--read-size read_size: Unit
         /// Set the log level
         optional -l,--log-level log_level: LevelFilter
-        /// Set the log level
+        /// How long to wait for cache locks
         optional -t,--cache-lock-timeout cache_lock_timeout: u64
     }
 }
@@ -72,7 +73,7 @@ impl Piproxy {
             .clone()
             .unwrap_or_else(|| PathBuf::from("cache"))
     }
-    getter_unit!(chunk_size, DEFAULT_CHUNK_SIZE);
+    getter_unit!(read_size, DEFAULT_READ_SIZE);
     getter_unit!(cache_size, DEFAULT_CACHE_SIZE);
     getter_default!(log_level, LevelFilter, DEFAULT_LOG_LEVEL);
     getter_default!(cache_lock_timeout, u64, DEFAULT_CACHE_TIMEOUT);

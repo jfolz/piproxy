@@ -15,7 +15,7 @@ fn main() {
         flags.get_cache_path(),
         flags.get_cache_size(),
         flags.get_cache_lock_timeout(),
-        flags.get_chunk_size(),
+        flags.get_read_size(),
     );
     proxy::populate_lru(&flags.get_cache_path()).unwrap();
 
@@ -24,7 +24,7 @@ fn main() {
         daemon: flags.daemon,
         nocapture: false,
         test: flags.test,
-        conf: flags.conf.to_owned(),
+        conf: flags.conf.clone(),
     };
     let mut my_server = Server::new(pingora_opts).unwrap();
     my_server.bootstrap();

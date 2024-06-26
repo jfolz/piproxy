@@ -29,7 +29,7 @@ pub struct FileStorage {
 fn path_from_key(dir: &Path, key: &CompactCacheKey, suffix: &str) -> Result<PathBuf> {
     let ser = rmp_serde::to_vec(&key).map_err(|err| perror("cannot serialize cachekey", err))?;
     let ser = const_hex::encode(ser);
-    assert_eq!(ser.len() % 2, 0, "path encodes to odd length hex {}", ser);
+    assert_eq!(ser.len() % 2, 0, "path encodes to odd length hex {ser}");
     Ok(dir.join(ser + suffix))
 }
 

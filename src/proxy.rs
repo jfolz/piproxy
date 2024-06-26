@@ -40,23 +40,20 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, ch
     let storage = match storage::FileStorage::new(cache_path, chunk_size) {
         Ok(storage) => storage,
         Err(err) => {
-            panic!("cannot create cache storage: {}", err);
+            panic!("cannot create cache storage: {err}");
         }
     };
-    if STORAGE.set(storage).is_err() {
-        panic!("storage already set");
-    }
+    assert!(STORAGE.set(storage).is_ok(), "storage already set");
 
     let manager = Manager::new(cache_size);
-    if EVICTION.set(manager).is_err() {
-        panic!("eviction manager already set");
-    }
+    assert!(
+        EVICTION.set(manager).is_ok(),
+        "eviction manager already set"
+    );
 
     let timeout = Duration::from_secs(cache_lock_timeout);
     let cache_lock = CacheLock::new(timeout);
-    if CACHE_LOCK.set(cache_lock).is_err() {
-        panic!("cache lock already set");
-    }
+    assert!(CACHE_LOCK.set(cache_lock).is_ok(), "cache lock already set");
 }
 
 fn has_extension<'a, I>(entry: &DirEntry, exts: I) -> bool
@@ -80,7 +77,7 @@ fn key_from_entry(entry: &DirEntry) -> io::Result<CompactCacheKey> {
         "given entry is not a data file",
     ))?;
     let data = filename.as_encoded_bytes();
-    assert_eq!(data.len() % 2, 0, "path has odd length {:?}", filename);
+    assert_eq!(data.len() % 2, 0, "path has odd length {filename:?}");
     let ser: Vec<u8> =
         const_hex::decode(data).map_err(|err| io::Error::new(ErrorKind::UnexpectedEof, err))?;
     rmp_serde::from_slice(&ser).map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
@@ -95,14 +92,15 @@ enum ParseResult {
     Warning(io::Error),
 }
 
-fn parse_entry(entry: DirEntry) -> io::Result<Admission> {
+fn parse_entry_inner(entry: &DirEntry) -> io::Result<Admission> {
     let metadata = entry.metadata()?;
     let key = key_from_entry(&entry)?;
-    let size = metadata.size() as usize;
+    let size = usize::try_from(metadata.size())
+        .map_err(|err| io::Error::new(ErrorKind::InvalidInput, err))?;
     Ok((key, size))
 }
 
-fn parse_entry_checked(entry: io::Result<DirEntry>) -> ParseResult {
+fn parse_entry(entry: io::Result<DirEntry>) -> ParseResult {
     let entry = match entry {
         Ok(entry) => entry,
         Err(err) => return ParseResult::Warning(err),
@@ -114,7 +112,7 @@ fn parse_entry_checked(entry: io::Result<DirEntry>) -> ParseResult {
     if ftype.is_dir() {
         ParseResult::Dir(entry.path())
     } else if is_entry(&entry) {
-        match parse_entry(entry) {
+        match parse_entry_inner(&entry) {
             Ok(entry) => ParseResult::Entry(entry),
             Err(err) => ParseResult::Warning(err),
         }
@@ -150,7 +148,7 @@ pub fn populate_lru(cache_dir: &Path) -> io::Result<()> {
             }
         };
         for entry in entries {
-            match parse_entry_checked(entry) {
+            match parse_entry(entry) {
                 ParseResult::Dir(path) => todo.push(path),
                 ParseResult::Entry((key, size)) => {
                     for key in manager.admit(key, size, fresh_until) {
@@ -313,12 +311,13 @@ impl ProxyHttp for PyPIProxy<'_> {
             Some(storage) => storage,
             None => return Ok(()),
         };
-        type EvictorRef = &'static (dyn pingora::cache::eviction::EvictionManager + Sync);
         session.cache.enable(
             // storage: the cache storage backend that implements storage::Storage
             storage,
             // eviction: optionally the eviction manager, without it, nothing will be evicted from the storage
-            EVICTION.get().map(|v| v as EvictorRef),
+            EVICTION
+                .get()
+                .map(|v| v as &'static (dyn pingora::cache::eviction::EvictionManager + Sync)),
             // predictor: optionally a cache predictor. The cache predictor predicts whether something is likely to be cacheable or not.
             //            This is useful because the proxy can apply different types of optimization to cacheable and uncacheable requests.
             None,
@@ -346,7 +345,8 @@ impl ProxyHttp for PyPIProxy<'_> {
                         .map_or("0", |age| age.to_str().unwrap_or("0"));
                     let age: u64 = age.parse().unwrap_or(0);
                     let age = Duration::from_secs(age);
-                    let max_age = Duration::from_secs(control.fresh_sec().unwrap_or(600) as u64);
+                    let max_age =
+                        Duration::from_secs(u64::from(control.fresh_sec().unwrap_or(600)));
                     let fresh_until: SystemTime = now + max_age;
                     let created = now - age;
                     let revalidate_sec = control.serve_stale_while_revalidate_sec().unwrap_or(60);
