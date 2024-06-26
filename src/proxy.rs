@@ -94,7 +94,7 @@ enum ParseResult {
 
 fn parse_entry_inner(entry: &DirEntry) -> io::Result<Admission> {
     let metadata = entry.metadata()?;
-    let key = key_from_entry(&entry)?;
+    let key = key_from_entry(entry)?;
     let size = usize::try_from(metadata.size())
         .map_err(|err| io::Error::new(ErrorKind::InvalidInput, err))?;
     Ok((key, size))
@@ -307,9 +307,8 @@ impl ProxyHttp for PyPIProxy<'_> {
     }
 
     fn request_cache_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<()> {
-        let storage = match STORAGE.get() {
-            Some(storage) => storage,
-            None => return Ok(()),
+        let Some(storage) = STORAGE.get() else {
+            return Ok(());
         };
         session.cache.enable(
             // storage: the cache storage backend that implements storage::Storage

@@ -61,9 +61,20 @@ impl HandleMiss for FileMissHandler {
             .map_err(|err| perror("cannot sync partial file", err))?;
         // try to remove the final file, if it exists
         match fs::remove_file(&self.final_path).await {
-            Ok(()) => log::warn!("removed existing final data file {}", self.final_path.to_string_lossy()),
-            Err(err) if err.kind() == ErrorKind::NotFound => {},
-            Err(err) => return e_perror("final file already exists, but cannot be removed", err)
+            Ok(()) => log::warn!(
+                "removed existing final data file {}",
+                self.final_path.to_string_lossy()
+            ),
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => {
+                return e_perror(
+                    format!(
+                        "final file {} already exists, but cannot be removed",
+                        self.final_path.to_string_lossy()
+                    ),
+                    err,
+                )
+            }
         }
         // finally, rename partial to final file
         fs::rename(self.partial_path.as_path(), self.final_path.as_path())

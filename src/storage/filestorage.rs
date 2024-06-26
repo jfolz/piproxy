@@ -12,8 +12,8 @@ use std::{
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::fs::{self, File, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::hithandler::FileHitHandler;
 use super::misshandler::FileMissHandler;
@@ -121,8 +121,7 @@ impl FileStorage {
 
     fn pop_cachemeta_sync(&'static self, key: &CompactCacheKey) -> Result<()> {
         let path = self.meta_path(key)?;
-        std::fs::remove_file(path)
-            .map_err(|err| perror("pop cachemeta", err))?;
+        std::fs::remove_file(path).map_err(|err| perror("pop cachemeta", err))?;
         Ok(())
     }
 
@@ -170,9 +169,7 @@ fn content_length(meta: &CacheMeta) -> Option<u64> {
 }
 
 fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
-    let header_size = if let Some(size) = content_length(meta) {
-        size
-    } else {
+    let Some(header_size) = content_length(meta) else {
         return Err(Error::explain(
             ErrorType::InternalError,
             "cannot determine content-length",
@@ -209,7 +206,7 @@ impl Storage for FileStorage {
                     Ok(Some((meta, h)))
                 } else {
                     log::warn!(
-                        "cachemeta for {} exists, but no data file found",
+                        "cachemeta {} exists, but no corresponding data file found",
                         meta_path.to_string_lossy()
                     );
                     Ok(None)
@@ -235,9 +232,20 @@ impl Storage for FileStorage {
         ensure_parent_dirs_exist(&final_path).await?;
         ensure_parent_dirs_exist(&meta_path).await?;
         match fs::remove_file(&final_path).await {
-            Ok(()) => log::warn!("removed existing final data file {}", &final_path.to_string_lossy()),
-            Err(err) if err.kind() == ErrorKind::NotFound => {},
-            Err(err) => return e_perror("final file already exists, but cannot be removed", err)
+            Ok(()) => log::warn!(
+                "removed existing final data file {}",
+                &final_path.to_string_lossy()
+            ),
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => {
+                return e_perror(
+                    format!(
+                        "final file {} already exists, but cannot be removed",
+                        &final_path.to_string_lossy()
+                    ),
+                    err,
+                )
+            }
         }
         let h = FileMissHandler::new(partial_path, final_path, meta_path).await?;
         Ok(Box::new(h))
