@@ -36,7 +36,7 @@ impl PartialFileHitHandler {
             }
             Err(err) => e_perror("error opening partial data file", err)?,
         };
-        let read_timeout = Duration::from_millis(100);
+        let read_timeout = Duration::from_millis(10);
         Ok(Self {
             final_path,
             is_final,
@@ -46,9 +46,8 @@ impl PartialFileHitHandler {
         })
     }
 
-    fn is_done(&mut self) -> bool {
+    fn check_final(&mut self) {
         self.is_final = self.is_final || self.final_path.exists();
-        self.is_final
     }
 }
 
@@ -56,16 +55,19 @@ impl PartialFileHitHandler {
 impl HandleHit for PartialFileHitHandler {
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
         loop {
-            let final_before_read = self.is_done();
             let mut buf = BytesMut::zeroed(self.read_size);
+            // note: read may return immediately with 0 bytes read, so timeout may never occur
             match timeout(self.read_timeout, self.fp.read(buf.as_mut())).await {
                 Ok(result) => {
                     match result {
                         Ok(n) => {
-                            // we saw writing was done, then read nothing,
-                            // so we know the file has been read completely
-                            if n == 0 && final_before_read {
-                                return Ok(None);
+                            if n == 0 {
+                                if self.is_final {
+                                    // we saw writing was done before we tried to read,
+                                    // then read nothing again,
+                                    // so we know the file has been read completely
+                                    return Ok(None);
+                                }
                             }
                             // we read something, so we can just return it
                             if n > 0 {
@@ -78,12 +80,16 @@ impl HandleHit for PartialFileHitHandler {
                 }
                 Err(_) => {
                     // we saw writing was done, then read timed out,
-                    // so we know the file has been read completely
-                    if final_before_read {
+                    // this should mean the file has been read completely
+                    if self.is_final {
                         return Ok(None);
                     }
                 }
             }
+            // sleep a bit since read might have returned immediately
+            tokio::time::sleep(self.read_timeout).await;
+            // we didn't read anything, so check if final file exists
+            self.check_final();
         }
     }
 
