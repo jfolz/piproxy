@@ -7,8 +7,14 @@ rust:
   script:
     - apt-get update
     - apt-get install -y cmake
+    - cargo build --verbose
+    - cargo test --verbose
     - cargo build --verbose --release
     - cargo test --verbose --release
+    - cargo build --verbose --profile release-min
+    - cargo test --verbose --profile release-min
   artifacts:
     paths:
+    - target/debug/piproxy
     - target/release/piproxy
+    - target/release-min/piproxy
