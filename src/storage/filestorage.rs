@@ -8,10 +8,12 @@ use pingora::{
     prelude::*,
 };
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, ErrorKind, Read, Write},
+    io::{self, ErrorKind},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::fs::{self, File, OpenOptions};
 
 use super::hithandler::FileHitHandler;
 use super::misshandler::FileMissHandler;
@@ -65,7 +67,7 @@ fn deserialize_cachemeta(data: &[u8]) -> Result<CacheMeta> {
 impl FileStorage {
     pub fn new(path: PathBuf, read_size: usize) -> io::Result<Self> {
         if !path.exists() {
-            fs::create_dir_all(&path)?;
+            std::fs::create_dir_all(&path)?;
         }
         Ok(Self { path, read_size })
     }
@@ -85,12 +87,12 @@ impl FileStorage {
         path_from_key(&self.path, key, ".meta")
     }
 
-    fn get_cachemeta(&'static self, key: &CompactCacheKey) -> Result<Option<CacheMeta>> {
+    async fn get_cachemeta(&'static self, key: &CompactCacheKey) -> Result<Option<CacheMeta>> {
         let path = self.meta_path(key)?;
-        match File::open(path) {
+        match File::open(path).await {
             Ok(mut fp) => {
                 let mut data = Vec::new();
-                match fp.read_to_end(&mut data) {
+                match fp.read_to_end(&mut data).await {
                     Ok(_) => Ok(Some(deserialize_cachemeta(&data)?)),
                     Err(err) => e_perror("error reading cachemeta", err),
                 }
@@ -100,7 +102,7 @@ impl FileStorage {
         }
     }
 
-    fn put_cachemeta(&'static self, key: &CompactCacheKey, meta: &CacheMeta) -> Result<()> {
+    async fn put_cachemeta(&'static self, key: &CompactCacheKey, meta: &CacheMeta) -> Result<()> {
         let data = serialize_cachemeta(meta)?;
         let path = self.meta_path(key)?;
         let mut fp = OpenOptions::new()
@@ -109,22 +111,25 @@ impl FileStorage {
             .read(false)
             .write(true)
             .open(path)
+            .await
             .map_err(|err| perror("error opening file", err))?;
         fp.write_all(&data)
+            .await
             .map_err(|err| perror("error writing to file", err))?;
         Ok(())
     }
 
-    fn pop_cachemeta(&'static self, key: &CompactCacheKey) -> Result<()> {
+    fn pop_cachemeta_sync(&'static self, key: &CompactCacheKey) -> Result<()> {
         let path = self.meta_path(key)?;
-        fs::remove_file(path).map_err(|err| perror("pop cachemeta", err))?;
+        std::fs::remove_file(path)
+            .map_err(|err| perror("pop cachemeta", err))?;
         Ok(())
     }
 
     pub fn purge_sync(&'static self, key: &CompactCacheKey) -> Result<bool> {
         let data_path = self.final_data_path(key)?;
-        let err_meta = self.pop_cachemeta(key);
-        let err_data = fs::remove_file(&data_path);
+        let err_meta = self.pop_cachemeta_sync(key);
+        let err_data = std::fs::remove_file(&data_path);
         match (err_meta, err_data) {
             (Ok(()), Ok(())) => Ok(true),
             (Err(e1), Ok(())) => e_perror("Failed to remove cachemeta {}", e1),
@@ -144,15 +149,40 @@ impl FileStorage {
     }
 }
 
-fn ensure_parent_dirs_exist(path: &Path) -> Result<()> {
+async fn ensure_parent_dirs_exist(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            if let Err(err) = fs::create_dir_all(parent) {
+            if let Err(err) = fs::create_dir_all(parent).await {
                 return e_perror("error creating cache dir", err);
             }
         }
     }
     Ok(())
+}
+
+fn content_length(meta: &CacheMeta) -> Option<u64> {
+    meta.response_header()
+        .headers
+        .get("Content-Length")?
+        .to_str()
+        .ok()
+        .and_then(|s| s.parse().ok())
+}
+
+fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
+    let header_size = if let Some(size) = content_length(meta) {
+        size
+    } else {
+        return Err(Error::explain(
+            ErrorType::InternalError,
+            "cannot determine content-length",
+        ));
+    };
+    let file_size = path
+        .metadata()
+        .map_err(|err| perror("cannot determine size of cached file", err))?
+        .size();
+    Ok(header_size == file_size)
 }
 
 #[async_trait]
@@ -163,19 +193,27 @@ impl Storage for FileStorage {
         _trace: &SpanHandle,
     ) -> Result<Option<(CacheMeta, HitHandler)>> {
         let key = key.to_compact();
-        match self.get_cachemeta(&key) {
+        match self.get_cachemeta(&key).await {
             Ok(Some(meta)) => {
+                let meta_path = self.meta_path(&key)?;
                 let final_path = self.final_data_path(&key)?;
                 let partial_path = self.partial_data_path(&key)?;
-                let h: HitHandler = if partial_path.exists() {
-                    Box::new(
+                if final_path.exists() && has_correct_size(&meta, &final_path)? {
+                    let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                    Ok(Some((meta, h)))
+                } else if partial_path.exists() {
+                    let h = Box::new(
                         PartialFileHitHandler::new(partial_path, final_path, self.read_size)
                             .await?,
-                    )
+                    );
+                    Ok(Some((meta, h)))
                 } else {
-                    Box::new(FileHitHandler::new(final_path, self.read_size).await?)
-                };
-                Ok(Some((meta, h)))
+                    log::warn!(
+                        "cachemeta for {} exists, but no data file found",
+                        meta_path.to_string_lossy()
+                    );
+                    Ok(None)
+                }
             }
             Ok(None) => Ok(None),
             Err(err) => Err(err),
@@ -189,13 +227,18 @@ impl Storage for FileStorage {
         _trace: &SpanHandle,
     ) -> Result<MissHandler> {
         let key = key.to_compact();
-        self.put_cachemeta(&key, meta)?;
+        self.put_cachemeta(&key, meta).await?;
         let partial_path = self.partial_data_path(&key)?;
         let final_path = self.final_data_path(&key)?;
         let meta_path = self.meta_path(&key)?;
-        ensure_parent_dirs_exist(&partial_path)?;
-        ensure_parent_dirs_exist(&final_path)?;
-        ensure_parent_dirs_exist(&meta_path)?;
+        ensure_parent_dirs_exist(&partial_path).await?;
+        ensure_parent_dirs_exist(&final_path).await?;
+        ensure_parent_dirs_exist(&meta_path).await?;
+        match fs::remove_file(&final_path).await {
+            Ok(()) => log::warn!("removed existing final data file {}", &final_path.to_string_lossy()),
+            Err(err) if err.kind() == ErrorKind::NotFound => {},
+            Err(err) => return e_perror("final file already exists, but cannot be removed", err)
+        }
         let h = FileMissHandler::new(partial_path, final_path, meta_path).await?;
         Ok(Box::new(h))
     }
@@ -210,7 +253,7 @@ impl Storage for FileStorage {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<bool> {
-        self.put_cachemeta(&key.to_compact(), meta)?;
+        self.put_cachemeta(&key.to_compact(), meta).await?;
         Ok(true)
     }
 
