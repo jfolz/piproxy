@@ -26,7 +26,7 @@ pub struct FileStorage {
     read_size: usize,
 }
 
-fn path_from_key(dir: &PathBuf, key: &CompactCacheKey, suffix: &str) -> Result<PathBuf> {
+fn path_from_key(dir: &Path, key: &CompactCacheKey, suffix: &str) -> Result<PathBuf> {
     let ser = rmp_serde::to_vec(&key).map_err(|err| perror("cannot serialize cachekey", err))?;
     let ser = const_hex::encode(ser);
     assert_eq!(ser.len() % 2, 0, "path encodes to odd length hex {}", ser);
@@ -56,7 +56,7 @@ fn serialize_cachemeta(meta: &CacheMeta) -> Result<Vec<u8>> {
 
 fn deserialize_cachemeta(data: &[u8]) -> Result<CacheMeta> {
     //assert_eq!((42, "the Answer"), );
-    match rmp_serde::from_slice::<CacheMetaData>(&data) {
+    match rmp_serde::from_slice::<CacheMetaData>(data) {
         Ok(cmd) => CacheMeta::deserialize(cmd.internal, cmd.header),
         Err(err) => e_perror("cannot deserialize cachemeta", err),
     }
@@ -67,10 +67,7 @@ impl FileStorage {
         if !path.exists() {
             fs::create_dir_all(&path)?;
         }
-        Ok(Self {
-            path: path,
-            read_size: read_size,
-        })
+        Ok(Self { path, read_size })
     }
 
     fn final_data_path(&'static self, key: &CompactCacheKey) -> Result<PathBuf> {
@@ -90,7 +87,7 @@ impl FileStorage {
 
     fn get_cachemeta(&'static self, key: &CompactCacheKey) -> Result<Option<CacheMeta>> {
         let path = self.meta_path(key)?;
-        match File::open(&path) {
+        match File::open(path) {
             Ok(mut fp) => {
                 let mut data = Vec::new();
                 match fp.read_to_end(&mut data) {
@@ -108,9 +105,10 @@ impl FileStorage {
         let path = self.meta_path(key)?;
         let mut fp = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .read(false)
             .write(true)
-            .open(&path)
+            .open(path)
             .map_err(|err| perror("error opening file", err))?;
         fp.write_all(&data)
             .map_err(|err| perror("error writing to file", err))?;
@@ -119,7 +117,7 @@ impl FileStorage {
 
     fn pop_cachemeta(&'static self, key: &CompactCacheKey) -> Result<()> {
         let path = self.meta_path(key)?;
-        fs::remove_file(&path).map_err(|err| perror("pop cachemeta", err))?;
+        fs::remove_file(path).map_err(|err| perror("pop cachemeta", err))?;
         Ok(())
     }
 
@@ -169,15 +167,14 @@ impl Storage for FileStorage {
             Ok(Some(meta)) => {
                 let final_path = self.final_data_path(&key)?;
                 let partial_path = self.partial_data_path(&key)?;
-                let h: HitHandler;
-                if partial_path.exists() {
-                    h = Box::new(
+                let h: HitHandler = if partial_path.exists() {
+                    Box::new(
                         PartialFileHitHandler::new(partial_path, final_path, self.read_size)
                             .await?,
-                    );
+                    )
                 } else {
-                    h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
-                }
+                    Box::new(FileHitHandler::new(final_path, self.read_size).await?)
+                };
                 Ok(Some((meta, h)))
             }
             Ok(None) => Ok(None),

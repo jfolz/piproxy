@@ -17,6 +17,7 @@ use std::{
     fs::{self, DirEntry},
     io::{self, ErrorKind},
     os::unix::fs::MetadataExt,
+    path::Path,
     str,
 };
 use std::{
@@ -42,17 +43,18 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, ch
             panic!("cannot create cache storage: {}", err);
         }
     };
-    if let Err(_) = STORAGE.set(storage) {
+    if STORAGE.set(storage).is_err() {
         panic!("storage already set");
     }
 
     let manager = Manager::new(cache_size);
-    if let Err(_) = EVICTION.set(manager) {
+    if EVICTION.set(manager).is_err() {
         panic!("eviction manager already set");
     }
 
     let timeout = Duration::from_secs(cache_lock_timeout);
-    if let Err(_) = CACHE_LOCK.set(CacheLock::new(timeout)) {
+    let cache_lock = CacheLock::new(timeout);
+    if CACHE_LOCK.set(cache_lock).is_err() {
         panic!("cache lock already set");
     }
 }
@@ -121,25 +123,21 @@ fn parse_entry_checked(entry: io::Result<DirEntry>) -> ParseResult {
     }
 }
 
-pub fn populate_lru(cache_dir: &PathBuf) -> io::Result<()> {
+pub fn populate_lru(cache_dir: &Path) -> io::Result<()> {
     let manager = EVICTION
         .get()
         .ok_or(io::Error::new(ErrorKind::Other, "eviction manager not set"))?;
     let storage = STORAGE
         .get()
         .ok_or(io::Error::new(ErrorKind::Other, "cache storage not set"))?;
-    let mut todo = vec![cache_dir.clone()];
+    let mut todo = vec![cache_dir.to_owned()];
     // simple_lru manager does not use fresh_until, make sure this is actually simple_lru
     assert_eq!(
         manager.type_id(),
         TypeId::of::<pingora::cache::eviction::simple_lru::Manager>()
     );
     let fresh_until = SystemTime::now() + Duration::from_secs(356_000_000);
-    loop {
-        let next = match todo.pop() {
-            Some(next) => next,
-            None => break,
-        };
+    while let Some(next) = todo.pop() {
         let entries = match fs::read_dir(&next) {
             Ok(entries) => entries,
             Err(err) => {
@@ -230,15 +228,13 @@ impl ProxyHttp for PyPIProxy<'_> {
         session: &mut Session,
         _ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        let addr;
-        // for pacakges use files.pythonhosted.org
-        if request_path(session).starts_with(b"/packages/") {
-            addr = (FILES_PYTHONHOSTED_ORG, 443);
-        }
-        // otherwise pypi.org
-        else {
-            addr = (PYPI_ORG, 443);
-        }
+        let addr = if request_path(session).starts_with(b"/packages/") {
+            // for pacakges use files.pythonhosted.org
+            (FILES_PYTHONHOSTED_ORG, 443)
+        } else {
+            // otherwise pypi.org
+            (PYPI_ORG, 443)
+        };
         let peer = Box::new(HttpPeer::new(addr, true, addr.0.to_string()));
         Ok(peer)
     }
@@ -281,7 +277,7 @@ impl ProxyHttp for PyPIProxy<'_> {
         }
         // only modify html pages
         if let Some(ct) = upstream_response.headers.get("Content-Type") {
-            if let Some(_) = self.finder_content_type.find(ct.as_bytes()) {
+            if self.finder_content_type.find(ct.as_bytes()).is_some() {
                 ctx.modify = true;
                 // Remove content-length because the size of the new body is unknown
                 upstream_response.remove_header("Content-Length");
@@ -348,7 +344,7 @@ impl ProxyHttp for PyPIProxy<'_> {
                         .headers
                         .get("Age")
                         .map_or("0", |age| age.to_str().unwrap_or("0"));
-                    let age = u64::from_str_radix(age, 10).unwrap_or(0);
+                    let age: u64 = age.parse().unwrap_or(0);
                     let age = Duration::from_secs(age);
                     let max_age = Duration::from_secs(control.fresh_sec().unwrap_or(600) as u64);
                     let fresh_until: SystemTime = now + max_age;

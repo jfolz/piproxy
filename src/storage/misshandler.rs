@@ -25,7 +25,8 @@ impl FileMissHandler {
     ) -> Result<Self> {
         let fp = OpenOptions::new()
             .create(true)
-            .read(true)
+            .truncate(true)
+            .read(false)
             .write(true)
             .open(&partial_path)
             .await
@@ -34,7 +35,7 @@ impl FileMissHandler {
             partial_path,
             final_path,
             meta_path,
-            fp: fp,
+            fp,
             written: 0,
         })
     }
@@ -54,7 +55,7 @@ impl HandleMiss for FileMissHandler {
 
     async fn finish(self: Box<Self>) -> Result<usize> {
         self.fp
-            .sync_all()
+            .sync_data()
             .await
             .map_err(|err| perror("cannot sync partial file", err))?;
         fs::rename(self.partial_path.as_path(), self.final_path.as_path())
@@ -102,6 +103,6 @@ impl Drop for FileMissHandler {
     fn drop(&mut self) {
         let partial_path = self.partial_path.clone();
         let meta_path = self.meta_path.clone();
-        tokio::task::spawn(async move { cleanup(partial_path, meta_path) });
+        tokio::task::spawn(async move { cleanup(partial_path, meta_path).await });
     }
 }
