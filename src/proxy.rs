@@ -344,10 +344,10 @@ impl ProxyHttp for PyPIProxy<'_> {
             match control.is_cacheable() {
                 Cacheable::Yes | Cacheable::Default => {
                     let now = SystemTime::now();
-                    let age = match resp.headers.get("Age") {
-                        Some(age) => age.to_str().unwrap_or("0"),
-                        None => "0",
-                    };
+                    let age = resp
+                        .headers
+                        .get("Age")
+                        .map_or("0", |age| age.to_str().unwrap_or("0"));
                     let age = u64::from_str_radix(age, 10).unwrap_or(0);
                     let age = Duration::from_secs(age);
                     let max_age = Duration::from_secs(control.fresh_sec().unwrap_or(600) as u64);
