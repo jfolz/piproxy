@@ -1,0 +1,12 @@
+stages:
+  - build
+
+rust-alpine:
+  stage: build
+  image: rust:alpine
+  script:
+    - cargo build --verbose --release
+    - cargo test --verbose --release
+  artifacts:
+    paths:
+    - target/release/piproxy
