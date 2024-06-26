@@ -6,7 +6,7 @@ rust:
   image: rust:slim
   script:
     - apt-get update
-    - apt-get install pkg-config libssl-dev
+    - apt-get install -y pkg-config libssl-dev
     - cargo build --verbose --release
     - cargo test --verbose --release
   artifacts:
