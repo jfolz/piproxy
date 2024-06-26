@@ -61,18 +61,15 @@ impl HandleHit for PartialFileHitHandler {
                 Ok(result) => {
                     match result {
                         Ok(n) => {
-                            if n == 0 {
-                                if self.is_final {
-                                    // we saw writing was done before we tried to read,
-                                    // then read nothing again,
-                                    // so we know the file has been read completely
-                                    return Ok(None);
-                                }
-                            }
-                            // we read something, so we can just return it
                             if n > 0 {
                                 let buf = buf.freeze();
                                 return Ok(Some(buf.slice(..n)));
+                            }
+                            // we saw writing was done before we tried to read,
+                            // then read nothing again,
+                            // so we know the file has been read completely
+                            if n == 0 && self.is_final {
+                                return Ok(None);
                             }
                         }
                         Err(err) => return e_perror("error reading from cache", err),
