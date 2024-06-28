@@ -28,7 +28,7 @@ fn main() {
     };
     let mut my_server = Server::new(pingora_opts).unwrap();
     my_server.bootstrap();
-    let inner = proxy::PyPIProxy::new();
+    let inner = proxy::PyPI::new();
     let mut pypi = http_proxy_service(&my_server.configuration, inner);
     pypi.add_tcp(flags.get_address());
     my_server.add_service(pypi);

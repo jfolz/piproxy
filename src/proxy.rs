@@ -165,18 +165,18 @@ pub fn populate_lru(cache_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub struct PyPIProxy<'a> {
-    finder_content_type: Finder<'a>,
-    finder_pythonhosted: Finder<'a>,
-    finder_pypi: Finder<'a>,
+pub struct PyPI<'a> {
+    content_type_text_html: Finder<'a>,
+    https_files_pythonhosted_org: Finder<'a>,
+    https_pypi_org: Finder<'a>,
 }
 
-impl<'a> PyPIProxy<'a> {
-    pub fn new() -> PyPIProxy<'a> {
-        PyPIProxy {
-            finder_content_type: Finder::new(CONTENT_TYPE_TEXT_HTML),
-            finder_pythonhosted: Finder::new(HTTPS_FILES_PYTHONHOSTED_ORG),
-            finder_pypi: Finder::new(HTTPS_PYPI_ORG),
+impl<'a> PyPI<'a> {
+    pub fn new() -> PyPI<'a> {
+        PyPI {
+            content_type_text_html: Finder::new(CONTENT_TYPE_TEXT_HTML),
+            https_files_pythonhosted_org: Finder::new(HTTPS_FILES_PYTHONHOSTED_ORG),
+            https_pypi_org: Finder::new(HTTPS_PYPI_ORG),
         }
     }
 }
@@ -215,7 +215,7 @@ where
 }
 
 #[async_trait]
-impl ProxyHttp for PyPIProxy<'_> {
+impl ProxyHttp for PyPI<'_> {
     type CTX = CacheCTX;
     fn new_ctx(&self) -> Self::CTX {
         Self::CTX::new()
@@ -269,13 +269,13 @@ impl ProxyHttp for PyPIProxy<'_> {
             || upstream_response.status == StatusCode::CREATED
         {
             if let Some(loc) = upstream_response.headers.get("Location") {
-                let loc = remove_in_slice(loc.as_bytes(), &self.finder_pypi);
+                let loc = remove_in_slice(loc.as_bytes(), &self.https_pypi_org);
                 upstream_response.insert_header("Location", loc).unwrap();
             }
         }
         // only modify html pages
         if let Some(ct) = upstream_response.headers.get("Content-Type") {
-            if self.finder_content_type.find(ct.as_bytes()).is_some() {
+            if self.content_type_text_html.find(ct.as_bytes()).is_some() {
                 ctx.modify = true;
                 // Remove content-length because the size of the new body is unknown
                 upstream_response.remove_header("Content-Length");
@@ -300,7 +300,8 @@ impl ProxyHttp for PyPIProxy<'_> {
                 b.clear();
             }
             if end_of_stream {
-                let out = remove_in_slice(ctx.buffer.as_slice(), &self.finder_pythonhosted);
+                let out =
+                    remove_in_slice(ctx.buffer.as_slice(), &self.https_files_pythonhosted_org);
                 *body = Some(bytes::Bytes::from(out));
             }
         }
