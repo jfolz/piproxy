@@ -36,8 +36,8 @@ const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
-pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, chunk_size: usize) {
-    let storage = match FileStorage::new(cache_path, chunk_size) {
+pub fn setup(cache_path: PathBuf, cache_size: usize, cache_timeout: u64, read_size: usize) {
+    let storage = match FileStorage::new(cache_path, read_size) {
         Ok(storage) => storage,
         Err(err) => {
             panic!("cannot create cache storage: {err}");
@@ -51,7 +51,7 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, ch
         "eviction manager already set"
     );
 
-    let timeout = Duration::from_secs(cache_lock_timeout);
+    let timeout = Duration::from_secs(cache_timeout);
     let cache_lock = CacheLock::new(timeout);
     assert!(CACHE_LOCK.set(cache_lock).is_ok(), "cache lock already set");
 }

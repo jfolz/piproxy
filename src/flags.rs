@@ -1,26 +1,34 @@
-use crate::defaults::{
-    DEFAULT_CACHE_SIZE, DEFAULT_CACHE_TIMEOUT, DEFAULT_LOG_LEVEL, DEFAULT_READ_SIZE,
-};
 use log::LevelFilter;
+use pingora::server::configuration::Opt;
+use pingora::server::configuration::ServerConf;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io;
+use std::path::Path;
 use std::path::PathBuf;
 use std::str;
 use std::str::FromStr;
 
-#[derive(Debug)]
-struct Unit(usize);
+use crate::defaults::DEFAULT_LOG_LEVEL;
+
+#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
+pub struct Unit(pub usize);
 
 impl FromStr for Unit {
-    type Err = parse_size::Error;
+    type Err = io::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let v = parse_size::Config::new().with_binary().parse_size(s)?;
-        let v = usize::try_from(v).map_err(|_| Self::Err::PosOverflow)?;
+        let v = parse_size::Config::new()
+            .with_binary()
+            .parse_size(s)
+            .map_err(|_| io::ErrorKind::InvalidInput)?;
+        let v = usize::try_from(v).map_err(|_| io::ErrorKind::InvalidInput)?;
         Ok(Self(v))
     }
 }
 
 xflags::xflags! {
-    cmd piproxy {
+    cmd flags {
         /// Whether this server should try to upgrade from an running old server
         optional -u,--upgrade
         /// Whether should run this server in the background
@@ -40,41 +48,112 @@ xflags::xflags! {
         /// Set the log level
         optional -l,--log-level log_level: LevelFilter
         /// How long to wait for cache locks
-        optional -t,--cache-lock-timeout cache_lock_timeout: u64
+        optional -t,--cache-lock-timeout cache_timeout: u64
     }
 }
 
-macro_rules! getter_unit {
-    ($field:ident, $default:expr) => {
-        paste::paste! {
-            pub fn [<get_ $field>](&self) -> usize {
-                self.$field.as_ref().map_or($default, |v| v.0)
-            }
-        }
-    };
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Piproxy {
+    pub upgrade: bool,
+    pub daemon: bool,
+    pub test: bool,
+    pub conf: Option<String>,
+    pub address: String,
+    pub cache_path: PathBuf,
+    pub cache_size: usize,
+    pub read_size: usize,
+    pub log_level: LevelFilter,
+    pub cache_timeout: u64,
 }
 
-macro_rules! getter_default {
-    ($field:ident, $type:ident, $default:expr) => {
-        paste::paste! {
-            pub fn [<get_ $field>](&self) -> $type {
-                self.$field.unwrap_or($default)
-            }
+impl Default for Piproxy {
+    fn default() -> Self {
+        Self {
+            upgrade: Default::default(),
+            daemon: Default::default(),
+            test: Default::default(),
+            conf: Default::default(),
+            address: Default::default(),
+            cache_path: Default::default(),
+            cache_size: Default::default(),
+            read_size: Default::default(),
+            log_level: DEFAULT_LOG_LEVEL,
+            cache_timeout: Default::default(),
         }
-    };
+    }
 }
 
 impl Piproxy {
-    pub fn get_address(&self) -> &str {
-        self.address.as_deref().unwrap_or("localhost:6188")
+    pub fn merge_flags(&mut self, flags: &Flags) {
+        self.upgrade |= flags.upgrade;
+        self.daemon |= flags.daemon;
+        self.test |= flags.test;
+        self.conf = flags.conf.clone();
+        if let Some(v) = &flags.address {
+            self.address = v.clone()
+        }
+        if let Some(v) = &flags.cache_path {
+            self.cache_path = v.clone()
+        }
+        if let Some(v) = &flags.cache_size {
+            self.cache_size = v.0
+        }
+        if let Some(v) = &flags.read_size {
+            self.read_size = v.0
+        }
+        if let Some(v) = flags.log_level {
+            self.log_level = v
+        }
+        if let Some(v) = flags.cache_lock_timeout {
+            self.cache_timeout = v
+        }
     }
-    pub fn get_cache_path(&self) -> PathBuf {
-        self.cache_path
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("cache"))
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Config {
+    pub piproxy: Piproxy,
+    pub pingora: ServerConf,
+}
+
+fn eother<E>(error: E) -> io::Error
+where
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    io::Error::new(io::ErrorKind::Other, error.into())
+}
+
+impl Config {
+    pub fn opt(&self) -> Opt {
+        Opt {
+            upgrade: self.piproxy.upgrade,
+            daemon: self.piproxy.daemon,
+            nocapture: false,
+            test: self.piproxy.test,
+            conf: self.piproxy.conf.clone(),
+        }
     }
-    getter_unit!(read_size, DEFAULT_READ_SIZE);
-    getter_unit!(cache_size, DEFAULT_CACHE_SIZE);
-    getter_default!(log_level, LevelFilter, DEFAULT_LOG_LEVEL);
-    getter_default!(cache_lock_timeout, u64, DEFAULT_CACHE_TIMEOUT);
+
+    pub fn load_from_yaml<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let conf_str = fs::read_to_string(&path)?;
+        Self::from_yaml(&conf_str)
+    }
+
+    pub fn from_yaml(conf_str: &str) -> io::Result<Self> {
+        let conf: Self = serde_yaml::from_str(conf_str).map_err(eother)?;
+        // can't validate, because that would move conf.pingora
+        // conf.pingora.validate().map_err(eother)?;
+        Ok(conf)
+    }
+}
+
+pub fn parse() -> io::Result<Config> {
+    let flags = Flags::from_env_or_exit();
+    let mut conf = if let Some(path) = &flags.conf {
+        Config::load_from_yaml(path)?
+    } else {
+        Config::default()
+    };
+    conf.piproxy.merge_flags(&flags);
+    Ok(conf)
 }
