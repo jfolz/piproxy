@@ -9,7 +9,12 @@ use std::path::PathBuf;
 use std::str;
 use std::str::FromStr;
 
+use crate::defaults::DEFAULT_ADDRESS;
+use crate::defaults::DEFAULT_CACHE_PATH;
+use crate::defaults::DEFAULT_CACHE_SIZE;
+use crate::defaults::DEFAULT_CACHE_TIMEOUT;
 use crate::defaults::DEFAULT_LOG_LEVEL;
+use crate::defaults::DEFAULT_READ_SIZE;
 
 #[derive(Debug)]
 pub struct Unit(pub usize);
@@ -35,6 +40,8 @@ xflags::xflags! {
         optional -d,--daemon
         /// Test the configuration and exit
         optional -t,--test
+        /// Set the log level
+        optional -l,--log-level log_level: LevelFilter
         /// The path to the configuration file
         optional -c,--conf conf: String
         /// Bind address
@@ -45,8 +52,6 @@ xflags::xflags! {
         optional -s,--cache-size cache_size: Unit
         /// Read size when reading from cache
         optional -r,--read-size read_size: Unit
-        /// Set the log level
-        optional -l,--log-level log_level: LevelFilter
         /// How long to wait for cache locks
         optional -t,--cache-lock-timeout cache_timeout: u64
     }
@@ -58,27 +63,27 @@ pub struct Piproxy {
     pub daemon: bool,
     pub test: bool,
     pub conf: Option<String>,
+    pub log_level: LevelFilter,
     pub address: String,
     pub cache_path: PathBuf,
     pub cache_size: usize,
     pub read_size: usize,
-    pub log_level: LevelFilter,
     pub cache_timeout: u64,
 }
 
 impl Default for Piproxy {
     fn default() -> Self {
         Self {
-            upgrade: Default::default(),
-            daemon: Default::default(),
-            test: Default::default(),
-            conf: Default::default(),
-            address: Default::default(),
-            cache_path: Default::default(),
-            cache_size: Default::default(),
-            read_size: Default::default(),
+            upgrade: false,
+            daemon: false,
+            test: false,
+            conf: None,
             log_level: DEFAULT_LOG_LEVEL,
-            cache_timeout: Default::default(),
+            address: DEFAULT_ADDRESS.to_owned(),
+            cache_path: DEFAULT_CACHE_PATH.into(),
+            cache_size: DEFAULT_CACHE_SIZE,
+            read_size: DEFAULT_READ_SIZE,
+            cache_timeout: DEFAULT_CACHE_TIMEOUT,
         }
     }
 }
