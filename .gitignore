@@ -1,5 +1,6 @@
 *.code-workspace
 /.vscode
-/target
 /cache
 /config.yaml
+/dist
+/target
