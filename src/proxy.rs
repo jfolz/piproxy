@@ -25,9 +25,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::storage;
+use crate::storage::FileStorage;
 
-static STORAGE: OnceCell<storage::FileStorage> = OnceCell::new();
+static STORAGE: OnceCell<FileStorage> = OnceCell::new();
 static EVICTION: OnceCell<Manager> = OnceCell::new();
 static CACHE_LOCK: OnceCell<CacheLock> = OnceCell::new();
 const PYPI_ORG: &str = "pypi.org";
@@ -37,7 +37,7 @@ const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
 pub fn setup(cache_path: PathBuf, cache_size: usize, cache_lock_timeout: u64, chunk_size: usize) {
-    let storage = match storage::FileStorage::new(cache_path, chunk_size) {
+    let storage = match FileStorage::new(cache_path, chunk_size) {
         Ok(storage) => storage,
         Err(err) => {
             panic!("cannot create cache storage: {err}");
