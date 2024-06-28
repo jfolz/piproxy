@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 use crate::defaults::DEFAULT_LOG_LEVEL;
 
-#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
+#[derive(Debug)]
 pub struct Unit(pub usize);
 
 impl FromStr for Unit {
