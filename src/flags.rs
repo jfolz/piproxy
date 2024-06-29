@@ -137,6 +137,8 @@ impl Config {
         }
 
         // TODO replace pico-args, it's just not a good library...
+        // piproxy -p -a -u val --> address = "-u"
+
         // parse args with values first to eat them up
         update_value!(log_level, ["-l", "--log-level"]);
         update_value!(cache_size, ["-s", "--cache-size"], from_unit_str);
