@@ -136,15 +136,20 @@ impl Config {
             };
         }
 
-        update_switch!(upgrade, ["-u", "--upgrade"]);
-        update_switch!(daemon, ["-d", "--daemon"]);
-        update_switch!(test, ["-t", "--test"]);
+        // TODO replace pico-args, it's just not a good library...
+        // parse args with values first to eat them up
         update_value!(log_level, ["-l", "--log-level"]);
-        update_value!(address, ["-a", "--address"]);
-        update_value!(cache_path, ["-p", "--cache-path"]);
         update_value!(cache_size, ["-s", "--cache-size"], from_unit_str);
         update_value!(read_size, ["-s", "--read-size"], from_unit_str);
         update_value!(cache_timeout, "--cache_timeout");
+        // parse args with string values next, as they don't need conversion
+        // and could thus eat the next arg if the value is missing
+        update_value!(address, ["-a", "--address"]);
+        update_value!(cache_path, ["-p", "--cache-path"]);
+        // parse flags (no value) last
+        update_switch!(upgrade, ["-u", "--upgrade"]);
+        update_switch!(daemon, ["-d", "--daemon"]);
+        update_switch!(test, ["-t", "--test"]);
 
         self.pingora.merge_with_opt(&self.opt());
         Ok(())
