@@ -10,7 +10,7 @@ mod storage;
 
 fn main() {
     logger::install().unwrap();
-    let conf = match flags::parse() {
+    let conf = match flags::Config::new_from_env() {
         Ok(conf) => conf,
         Err(err) => {
             println!("{:?}", err);

@@ -1,5 +1,4 @@
 use log::LevelFilter;
-use pico_args::Arguments;
 use pingora::server::configuration::Opt;
 use pingora::server::configuration::ServerConf;
 use serde::{Deserialize, Serialize};
@@ -7,9 +6,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::exit;
 use std::str;
 use std::str::FromStr;
+use clap::Parser;
 
 use crate::defaults::DEFAULT_ADDRESS;
 use crate::defaults::DEFAULT_CACHE_PATH;
@@ -18,59 +17,55 @@ use crate::defaults::DEFAULT_CACHE_TIMEOUT;
 use crate::defaults::DEFAULT_LOG_LEVEL;
 use crate::defaults::DEFAULT_READ_SIZE;
 
-const HELP: &str = "
-piproxy
+#[derive(Debug, Clone)]
+pub struct Unit(pub usize);
 
-OPTIONS:
-    -u, --upgrade
-      Whether this server should try to upgrade from an running old server
+impl FromStr for Unit {
+    type Err = io::Error;
 
-    -d, --daemon
-      Whether should run this server in the background
-
-    -t, --test
-      Test the configuration and exit
-
-    -c, --conf <conf>
-      The path to the configuration file
-
-    -a, --address <address>
-      Bind address
-
-    -p, --cache-path <cache_path>
-      Path where cached files are stored
-
-    -s, --cache-size <cache_size>
-      Maximum size of the cache
-
-    -r, --read-size <read_size>
-      Read size when reading from cache
-
-    -l, --log-level <log_level>
-      Set the log level
-
-    -t, --cache-lock-timeout <cache_timeout>
-      How long to wait for cache locks
-
-    -h, --help
-      Prints help information.
-";
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            upgrade: false,
-            daemon: false,
-            test: false,
-            log_level: DEFAULT_LOG_LEVEL,
-            address: DEFAULT_ADDRESS.to_owned(),
-            cache_path: DEFAULT_CACHE_PATH.into(),
-            cache_size: DEFAULT_CACHE_SIZE,
-            read_size: DEFAULT_READ_SIZE,
-            cache_timeout: DEFAULT_CACHE_TIMEOUT,
-            pingora: ServerConf::default(),
-        }
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let v = parse_size::Config::new()
+            .with_binary()
+            .parse_size(s)
+            .map_err(|_| io::ErrorKind::InvalidInput)?;
+        let v = usize::try_from(v).map_err(|_| io::ErrorKind::InvalidInput)?;
+        Ok(Self(v))
     }
+}
+
+impl Into<usize> for Unit {
+    fn into(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Parser, Debug)]
+pub struct Args {
+    #[arg(short, long)]
+    pub conf: Option<PathBuf>,
+    #[arg(short, long)]
+    pub upgrade: bool,
+    #[arg(short, long)]
+    pub daemon: bool,
+    #[arg(short, long)]
+    pub test: bool,
+    #[arg(
+        short,
+        long,
+        ignore_case = true,
+        value_parser = clap::builder::PossibleValuesParser::new(["off", "error", "warn", "info", "debug", "trace"]),
+    )]
+    pub log_level: Option<LevelFilter>,
+    #[arg(short, long)]
+    pub address: Option<String>,
+    #[arg(short='p', long)]
+    pub cache_path: Option<PathBuf>,
+    #[arg(short='s', long)]
+    pub cache_size: Option<Unit>,
+    #[arg(long)]
+    pub cache_timeout: Option<u64>,
+    #[arg(short, long)]
+    pub read_size: Option<Unit>,
 }
 
 fn default_address() -> String { DEFAULT_ADDRESS.to_owned() }
@@ -96,12 +91,29 @@ pub struct Config {
     pub cache_path: PathBuf,
     #[serde(default = "default_cache_size")]
     pub cache_size: usize,
-    #[serde(default = "default_read_size")]
-    pub read_size: usize,
     #[serde(default = "default_cache_timeout")]
     pub cache_timeout: u64,
+    #[serde(default = "default_read_size")]
+    pub read_size: usize,
     #[serde(default)]
     pub pingora: ServerConf,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            upgrade: false,
+            daemon: false,
+            test: false,
+            log_level: DEFAULT_LOG_LEVEL,
+            address: DEFAULT_ADDRESS.to_owned(),
+            cache_path: DEFAULT_CACHE_PATH.into(),
+            cache_size: DEFAULT_CACHE_SIZE,
+            cache_timeout: DEFAULT_CACHE_TIMEOUT,
+            read_size: DEFAULT_READ_SIZE,
+            pingora: ServerConf::default(),
+        }
+    }
 }
 
 fn eother<E>(error: E) -> io::Error
@@ -111,48 +123,38 @@ where
     io::Error::new(io::ErrorKind::Other, error.into())
 }
 
-fn from_unit_str(s: &str) -> std::result::Result<usize, parse_size::Error> {
-    let v = parse_size::Config::new().with_binary().parse_size(s)?;
-    usize::try_from(v).map_err(|_| parse_size::Error::PosOverflow)
-}
-
 impl Config {
-    pub fn update_from_args(&mut self, flags: &mut Arguments) -> io::Result<()> {
-        macro_rules! update_switch {
-            ($field:ident, $keys:expr) => {
-                self.$field |= flags.contains($keys);
-            };
+    pub fn new_from_env() -> io::Result<Self> {
+        let args = Args::parse();
+        let mut conf = Self::default();
+        if let Some(path) = &args.conf {
+            conf = Self::load_from_yaml(path)?;
+            conf.update_from_args(&args)?;
         }
-        macro_rules! update_value {
-            ($field:ident, $keys:expr, $fname:expr) => {
-                self.$field = match flags.opt_value_from_fn($keys, $fname) {
-                    Ok(Some(v)) => v,
-                    Ok(None) => self.$field.clone(),
-                    Err(err) => return Err(eother(err)),
+        Ok(conf)
+    }
+
+    pub fn update_from_args(&mut self, args: &Args) -> io::Result<()> {
+        // update switches
+        self.upgrade |= args.upgrade;
+        self.daemon |= args.daemon;
+        self.test |= args.test;
+
+        // update optionals
+        macro_rules! update_values {
+            ($field:ident) => {
+                if let Some(value) = args.$field.clone() {
+                    self.$field = value.into();
                 };
             };
-            ($field:ident, $keys:expr) => {
-                update_value!($field, $keys, FromStr::from_str);
+            ($field:ident, $($fields:ident),+) => {
+                update_values!($field);
+                update_values!($($fields),+);
             };
         }
+        update_values!(log_level, address, cache_path, cache_size, cache_timeout, read_size);
 
-        // TODO replace pico-args, it's just not a good library...
-        // piproxy -p -a -u val --> address = "-u"
-
-        // parse args with values first to eat them up
-        update_value!(log_level, ["-l", "--log-level"]);
-        update_value!(cache_size, ["-s", "--cache-size"], from_unit_str);
-        update_value!(read_size, ["-s", "--read-size"], from_unit_str);
-        update_value!(cache_timeout, "--cache_timeout");
-        // parse args with string values next, as they don't need conversion
-        // and could thus eat the next arg if the value is missing
-        update_value!(address, ["-a", "--address"]);
-        update_value!(cache_path, ["-p", "--cache-path"]);
-        // parse flags (no value) last
-        update_switch!(upgrade, ["-u", "--upgrade"]);
-        update_switch!(daemon, ["-d", "--daemon"]);
-        update_switch!(test, ["-t", "--test"]);
-
+        // update pingora server config
         self.pingora.merge_with_opt(&self.opt());
         Ok(())
     }
@@ -178,20 +180,4 @@ impl Config {
             conf: None,
         }
     }
-}
-
-pub fn parse() -> io::Result<Config> {
-    let mut args = pico_args::Arguments::from_env();
-    if args.contains(["-h", "--help"]) {
-        println!("{}", HELP);
-        exit(0);
-    }
-    let conf_path: Result<String, pico_args::Error> = args.value_from_str(["-c", "--conf"]);
-    let mut conf = if let Ok(path) = conf_path {
-        Config::load_from_yaml(path)?
-    } else {
-        Config::default()
-    };
-    conf.update_from_args(&mut args)?;
-    Ok(conf)
 }
