@@ -210,6 +210,8 @@ impl Config {
 
         // update pingora server config
         self.pingora.merge_with_opt(&self.opt());
+        // cannot validate pingora config, because it would move self.pingora
+        // self.pingora = self.pingora.validate().map_err(eother)?;
     }
 
     pub fn load_from_yaml<P: AsRef<Path>>(path: P) -> io::Result<Self> {
@@ -218,9 +220,8 @@ impl Config {
     }
 
     pub fn from_yaml(conf_str: &str) -> io::Result<Self> {
-        let conf: Self = serde_yaml::from_str(conf_str).map_err(eother)?;
-        // can't validate, because that would move conf.pingora
-        // conf.pingora.validate().map_err(eother)?;
+        let mut conf: Self = serde_yaml::from_str(conf_str).map_err(eother)?;
+        conf.pingora = conf.pingora.validate().map_err(eother)?;
         Ok(conf)
     }
 

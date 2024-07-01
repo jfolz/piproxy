@@ -26,7 +26,7 @@ fn main() {
     );
     proxy::populate_lru(&conf.cache_path).unwrap();
 
-    let mut my_server = Server::new(conf.opt()).unwrap();
+    let mut my_server = Server::new_with_opt_and_conf(conf.opt(), conf.pingora);
     my_server.bootstrap();
     let inner = proxy::PyPI::new();
     let mut pypi = http_proxy_service(&my_server.configuration, inner);
