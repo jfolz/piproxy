@@ -1,7 +1,7 @@
+use clap::Parser;
 use log::LevelFilter;
 use pingora::server::configuration::Opt;
 use pingora::server::configuration::ServerConf;
-use serde::de::Expected;
 use serde::de::{self, Visitor};
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str;
 use std::str::FromStr;
-use clap::Parser;
 
 use crate::defaults::DEFAULT_ADDRESS;
 use crate::defaults::DEFAULT_CACHE_PATH;
@@ -62,7 +61,8 @@ impl<'de> Visitor<'de> for UnitVisitor {
 impl<'de> Deserialize<'de> for Unit {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de> {
+        D: Deserializer<'de>,
+    {
         deserializer.deserialize_any(UnitVisitor)
     }
 }
@@ -86,9 +86,9 @@ pub struct Args {
     pub log_level: Option<LevelFilter>,
     #[arg(short, long)]
     pub address: Option<String>,
-    #[arg(short='p', long)]
+    #[arg(short = 'p', long)]
     pub cache_path: Option<PathBuf>,
-    #[arg(short='s', long)]
+    #[arg(short = 's', long)]
     pub cache_size: Option<Unit>,
     #[arg(long)]
     pub cache_timeout: Option<u64>,
@@ -96,14 +96,29 @@ pub struct Args {
     pub read_size: Option<Unit>,
 }
 
-fn default_address() -> String { DEFAULT_ADDRESS.to_owned() }
-fn default_log_level() -> LevelFilter { DEFAULT_LOG_LEVEL }
-fn default_cache_path() -> PathBuf { DEFAULT_CACHE_PATH.into() }
-fn default_cache_size() -> usize { DEFAULT_CACHE_SIZE }
-fn default_read_size() -> usize { DEFAULT_READ_SIZE }
-fn default_cache_timeout() -> u64 { DEFAULT_CACHE_TIMEOUT }
+fn default_address() -> String {
+    DEFAULT_ADDRESS.to_owned()
+}
+fn default_log_level() -> LevelFilter {
+    DEFAULT_LOG_LEVEL
+}
+fn default_cache_path() -> PathBuf {
+    DEFAULT_CACHE_PATH.into()
+}
+fn default_cache_size() -> usize {
+    DEFAULT_CACHE_SIZE
+}
+fn default_read_size() -> usize {
+    DEFAULT_READ_SIZE
+}
+fn default_cache_timeout() -> u64 {
+    DEFAULT_CACHE_TIMEOUT
+}
 
-fn deserialize_unit<'de, D>(deserializer: D) -> Result<usize, D::Error> where D: Deserializer<'de> {
+fn deserialize_unit<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
     Unit::deserialize(deserializer).map(|u| u.into())
 }
 
@@ -121,11 +136,11 @@ pub struct Config {
     pub address: String,
     #[serde(default = "default_cache_path")]
     pub cache_path: PathBuf,
-    #[serde(default = "default_cache_size", deserialize_with="deserialize_unit")]
+    #[serde(default = "default_cache_size", deserialize_with = "deserialize_unit")]
     pub cache_size: usize,
     #[serde(default = "default_cache_timeout")]
     pub cache_timeout: u64,
-    #[serde(default = "default_read_size", deserialize_with="deserialize_unit")]
+    #[serde(default = "default_read_size", deserialize_with = "deserialize_unit")]
     pub read_size: usize,
     #[serde(default)]
     pub pingora: ServerConf,
@@ -184,7 +199,14 @@ impl Config {
                 update_values!($($fields),+);
             };
         }
-        update_values!(log_level, address, cache_path, cache_size, cache_timeout, read_size);
+        update_values!(
+            log_level,
+            address,
+            cache_path,
+            cache_size,
+            cache_timeout,
+            read_size
+        );
 
         // update pingora server config
         self.pingora.merge_with_opt(&self.opt());
