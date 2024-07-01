@@ -129,12 +129,12 @@ impl Config {
         let mut conf = Self::default();
         if let Some(path) = &args.conf {
             conf = Self::load_from_yaml(path)?;
-            conf.update_from_args(&args)?;
+            conf.update_from_args(&args);
         }
         Ok(conf)
     }
 
-    pub fn update_from_args(&mut self, args: &Args) -> io::Result<()> {
+    pub fn update_from_args(&mut self, args: &Args) {
         // update switches
         self.upgrade |= args.upgrade;
         self.daemon |= args.daemon;
@@ -156,7 +156,6 @@ impl Config {
 
         // update pingora server config
         self.pingora.merge_with_opt(&self.opt());
-        Ok(())
     }
 
     pub fn load_from_yaml<P: AsRef<Path>>(path: P) -> io::Result<Self> {
