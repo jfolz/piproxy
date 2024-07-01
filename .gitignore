@@ -1,5 +1,6 @@
 *.code-workspace
 /.vscode
+/*.pid*
 /cache
 /config.yaml
 /dist
