@@ -1,4 +1,5 @@
 use clap::builder::TypedValueParser;
+use clap::value_parser;
 use clap::{builder::PossibleValuesParser, Parser};
 use log::LevelFilter;
 use pingora::server::configuration::Opt;
@@ -68,12 +69,16 @@ impl<'de> Deserialize<'de> for Unit {
 
 #[derive(Parser, Debug)]
 pub struct Args {
+    /// Path to config file
     #[arg(short, long)]
     pub conf: Option<PathBuf>,
+    /// Perform upgrade from another instance
     #[arg(short, long)]
     pub upgrade: bool,
+    /// Daemonize on launch
     #[arg(short, long)]
     pub daemon: bool,
+    /// Test the configuration
     #[arg(short, long)]
     pub test: bool,
     #[arg(
@@ -84,14 +89,22 @@ pub struct Args {
         value_parser = PossibleValuesParser::new(["off", "error", "warn", "info", "debug", "trace"]).map(|s| LevelFilter::from_str(&s).unwrap()),
     )]
     pub log_level: Option<LevelFilter>,
+    /// Bind address and port
     #[arg(short, long)]
     pub address: Option<String>,
+    /// Where to store cached files
     #[arg(short = 'p', long)]
     pub cache_path: Option<PathBuf>,
+    /// The cache size in bytes or with unit, e.g. 15M, 7G, 1T, ...
     #[arg(short = 's', long)]
     pub cache_size: Option<Unit>,
+    /// Max file size that can be admitted to the cache in percent [1..100] of cache size
+    #[arg(long, value_parser = value_parser!(u8).range(1..=100))]
+    pub cache_ratio: Option<u8>,
+    /// (advanced usage) How long to wait in seconds to acquire a cache lock
     #[arg(long)]
     pub cache_timeout: Option<u64>,
+    /// Size of chunks read from cached files
     #[arg(short, long)]
     pub read_size: Option<Unit>,
 }
@@ -108,7 +121,7 @@ fn default_cache_path() -> PathBuf {
 fn default_cache_size() -> usize {
     DEFAULT_CACHE_SIZE
 }
-fn default_cache_ratio() -> f64 {
+fn default_cache_ratio() -> u8 {
     DEFAULT_CACHE_RATIO
 }
 fn default_read_size() -> usize {
@@ -142,7 +155,7 @@ pub struct Config {
     #[serde(default = "default_cache_size", deserialize_with = "deserialize_unit")]
     pub cache_size: usize,
     #[serde(default = "default_cache_ratio")]
-    pub cache_ratio: f64,
+    pub cache_ratio: u8,
     #[serde(default = "default_cache_timeout")]
     pub cache_timeout: u64,
     #[serde(default = "default_read_size", deserialize_with = "deserialize_unit")]
@@ -210,6 +223,7 @@ impl Config {
             address,
             cache_path,
             cache_size,
+            cache_ratio,
             cache_timeout,
             read_size
         );

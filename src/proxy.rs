@@ -39,13 +39,14 @@ const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 #[allow(clippy::cast_sign_loss)]
 #[allow(clippy::cast_precision_loss)]
 #[allow(clippy::cast_possible_truncation)]
-fn calc_max_size(cache_size: usize, cache_ratio: f64) -> io::Result<usize> {
-    let out = cache_size as f64 * cache_ratio;
+fn calc_max_size(cache_size: usize, cache_ratio: u8) -> io::Result<usize> {
+    let f = cache_ratio as f64 / 100f64;
+    let out = cache_size as f64 * f;
     if out > usize::MAX as f64 || out < usize::MIN as f64 {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "cache_size {cache_size} * {cache_ratio} = {out}, which does not fit into usize"
+                "cache_size {cache_size} * {f} = {out}, which does not fit into usize"
             ),
         ))
     } else {
@@ -56,7 +57,7 @@ fn calc_max_size(cache_size: usize, cache_ratio: f64) -> io::Result<usize> {
 pub fn setup(
     cache_path: PathBuf,
     cache_size: usize,
-    cache_ratio: f64,
+    cache_ratio: u8,
     cache_timeout: u64,
     read_size: usize,
 ) -> io::Result<()> {
@@ -336,9 +337,6 @@ impl ProxyHttp for PyPI<'_> {
         let Some(storage) = STORAGE.get() else {
             return Ok(());
         };
-        session
-            .cache
-            .set_max_file_size_bytes(storage.max_file_size_bytes());
         session.cache.enable(
             // storage: the cache storage backend that implements storage::Storage
             storage,
@@ -353,6 +351,9 @@ impl ProxyHttp for PyPI<'_> {
             //             Without it such lookups will all be allowed to fetch the asset independently.
             CACHE_LOCK.get(),
         );
+        session
+            .cache
+            .set_max_file_size_bytes(storage.max_file_size_bytes());
         Ok(())
     }
 
