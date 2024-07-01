@@ -68,6 +68,7 @@ impl HandleHit for PartialFileHitHandler {
                             // we saw writing was done before we tried to read,
                             // then read nothing again,
                             // so we know the file has been read completely
+                            // TODO error if too long since last successful read
                             if n == 0 && self.is_final {
                                 return Ok(None);
                             }

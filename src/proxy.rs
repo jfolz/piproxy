@@ -45,9 +45,7 @@ fn calc_max_size(cache_size: usize, cache_ratio: u8) -> io::Result<usize> {
     if out > usize::MAX as f64 || out < usize::MIN as f64 {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!(
-                "cache_size {cache_size} * {f} = {out}, which does not fit into usize"
-            ),
+            format!("cache_size {cache_size} * {f} = {out}, which does not fit into usize"),
         ))
     } else {
         Ok(out as usize)

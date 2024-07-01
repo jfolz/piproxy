@@ -9,8 +9,8 @@ use pingora::{
 };
 use std::{
     io::{self, ErrorKind},
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
+    time::{Duration, SystemTime},
 };
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -209,7 +209,7 @@ fn is_chunked_encoding(meta: &CacheMeta) -> bool {
         .is_some_and(|h| b"chunked".eq_ignore_ascii_case(h.as_bytes()))
 }
 
-fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
+async fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
     let Some(header_size) = content_length(meta) else {
         // TODO determine content-length for responses with chunked encoding
         if is_chunked_encoding(meta) {
@@ -220,11 +220,16 @@ fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
             "cannot determine content-length",
         ));
     };
-    let file_size = path
-        .metadata()
+    let file_size = fs::metadata(path)
+        .await
         .map_err(|err| perror("cannot determine size of cached file", err))?
-        .size();
+        .len();
     Ok(header_size == file_size)
+}
+
+async fn recently_updated(path: &Path) -> io::Result<bool> {
+    let modified = fs::metadata(path).await?.modified()?;
+    Ok(SystemTime::now() < modified + Duration::from_secs(5))
 }
 
 #[async_trait]
@@ -240,14 +245,27 @@ impl Storage for FileStorage {
                 let meta_path = self.meta_path(&key)?;
                 let final_path = self.final_data_path(&key)?;
                 let partial_path = self.partial_data_path(&key)?;
-                if final_path.exists() && has_correct_size(&meta, &final_path)? {
+                if final_path.exists() && has_correct_size(&meta, &final_path).await? {
                     let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
                     Ok(Some((meta, h)))
                 } else if partial_path.exists() {
-                    let h = Box::new(
-                        PartialFileHitHandler::new(partial_path, final_path, self.read_size)
-                            .await?,
-                    );
+                    // only return partial hit if partial file has been written to recently
+                    let h = match recently_updated(&partial_path).await {
+                        Ok(true) => Box::new(
+                            PartialFileHitHandler::new(partial_path, final_path, self.read_size)
+                                .await?,
+                        ),
+                        Ok(false) => {
+                            log::warn!(
+                                "partial data file {} exists, but has not been written to recently",
+                                partial_path.to_string_lossy()
+                            );
+                            return Ok(None);
+                        }
+                        Err(err) => {
+                            return e_perror("cannot determine modified time of partial file", err)
+                        }
+                    };
                     Ok(Some((meta, h)))
                 } else {
                     log::warn!(
