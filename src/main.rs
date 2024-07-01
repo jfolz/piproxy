@@ -18,6 +18,7 @@ fn main() {
         }
     };
     logger::set_level(conf.log_level);
+    log::debug!("{conf:#?}");
     proxy::setup(
         conf.cache_path.clone(),
         conf.cache_size,

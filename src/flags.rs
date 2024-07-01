@@ -1,4 +1,5 @@
-use clap::Parser;
+use clap::builder::TypedValueParser;
+use clap::{Parser, builder::PossibleValuesParser};
 use log::LevelFilter;
 use pingora::server::configuration::Opt;
 use pingora::server::configuration::ServerConf;
@@ -81,7 +82,8 @@ pub struct Args {
         short,
         long,
         ignore_case = true,
-        value_parser = clap::builder::PossibleValuesParser::new(["off", "error", "warn", "info", "debug", "trace"]),
+        // unwrap is safe here, since only valid strings are passed on by the PossibleValuesParser
+        value_parser = PossibleValuesParser::new(["off", "error", "warn", "info", "debug", "trace"]).map(|s| LevelFilter::from_str(&s).unwrap()),
     )]
     pub log_level: Option<LevelFilter>,
     #[arg(short, long)]
@@ -176,8 +178,8 @@ impl Config {
         let mut conf = Self::default();
         if let Some(path) = &args.conf {
             conf = Self::load_from_yaml(path)?;
-            conf.update_from_args(&args);
         }
+        conf.update_from_args(&args);
         Ok(conf)
     }
 
