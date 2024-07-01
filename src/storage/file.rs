@@ -229,6 +229,7 @@ async fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
 
 async fn recently_updated(path: &Path) -> io::Result<bool> {
     let modified = fs::metadata(path).await?.modified()?;
+    // TODO make recentness duration configurable
     Ok(SystemTime::now() < modified + Duration::from_secs(5))
 }
 

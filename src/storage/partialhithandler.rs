@@ -20,6 +20,7 @@ pub struct PartialFileHitHandler {
     fp: File,
     read_size: usize,
     read_timeout: Duration,
+    max_unsuccessful_reads: usize,
 }
 
 impl PartialFileHitHandler {
@@ -36,13 +37,24 @@ impl PartialFileHitHandler {
             }
             Err(err) => e_perror("error opening partial data file", err)?,
         };
+        // TODO make these timeouts configurable
         let read_timeout = Duration::from_millis(10);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let max_unsuccessful_reads =
+            (Duration::from_secs(5).as_secs_f64() / read_timeout.as_secs_f64()).ceil() as usize;
+        if max_unsuccessful_reads == 0 {
+            return Err(Error::explain(
+                ErrorType::InternalError,
+                "max_unsuccessful_reads is 0",
+            ));
+        }
         Ok(Self {
             final_path,
             is_final,
             fp,
             read_size,
             read_timeout,
+            max_unsuccessful_reads,
         })
     }
 
@@ -54,6 +66,7 @@ impl PartialFileHitHandler {
 #[async_trait]
 impl HandleHit for PartialFileHitHandler {
     async fn read_body(&mut self) -> Result<Option<bytes::Bytes>> {
+        let mut unsuccessful_reads = 0;
         loop {
             let mut buf = BytesMut::zeroed(self.read_size);
             // note: read may return immediately with 0 bytes read, so timeout may never occur
@@ -64,14 +77,14 @@ impl HandleHit for PartialFileHitHandler {
                             if n > 0 {
                                 let buf = buf.freeze();
                                 return Ok(Some(buf.slice(..n)));
-                            }
-                            // we saw writing was done before we tried to read,
-                            // then read nothing again,
-                            // so we know the file has been read completely
-                            // TODO error if too long since last successful read
-                            if n == 0 && self.is_final {
+                            } else if self.is_final {
+                                // we saw writing was done before we tried to read,
+                                // then read nothing again,
+                                // so we know the file has been read completely
+                                // TODO error if too long since last successful read
                                 return Ok(None);
                             }
+                            unsuccessful_reads += 1;
                         }
                         Err(err) => return e_perror("error reading from cache", err),
                     }
@@ -83,6 +96,12 @@ impl HandleHit for PartialFileHitHandler {
                         return Ok(None);
                     }
                 }
+            }
+            if unsuccessful_reads > self.max_unsuccessful_reads {
+                return Err(Error::explain(
+                    ErrorType::FileReadError,
+                    "too many failed attempts to read from partial file",
+                ));
             }
             // sleep a bit since read might have returned immediately
             tokio::time::sleep(self.read_timeout).await;

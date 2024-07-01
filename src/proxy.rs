@@ -40,7 +40,7 @@ const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 #[allow(clippy::cast_precision_loss)]
 #[allow(clippy::cast_possible_truncation)]
 fn calc_max_size(cache_size: usize, cache_ratio: u8) -> io::Result<usize> {
-    let f = cache_ratio as f64 / 100f64;
+    let f = f64::from(cache_ratio) / 100f64;
     let out = cache_size as f64 * f;
     if out > usize::MAX as f64 || out < usize::MIN as f64 {
         Err(io::Error::new(
