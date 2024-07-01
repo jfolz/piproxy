@@ -25,6 +25,7 @@ use super::{
 #[derive(Debug)]
 pub struct FileStorage {
     path: PathBuf,
+    max_size: usize,
     read_size: usize,
 }
 
@@ -35,13 +36,22 @@ pub(crate) type Blake2b32 = Blake2b<blake2::digest::consts::U3>;
 fn path_from_key(dir: &Path, key: &CompactCacheKey, suffix: &str) -> Result<PathBuf> {
     let ser = rmp_serde::to_vec(&key).map_err(|err| perror("cannot serialize cachekey", err))?;
     let hex_ser = const_hex::encode(&ser);
-    assert_eq!(hex_ser.len() % 2, 0, "path encodes to odd length hex {hex_ser}");
+    assert_eq!(
+        hex_ser.len() % 2,
+        0,
+        "path encodes to odd length hex {hex_ser}"
+    );
 
     let mut hasher = Blake2b32::new();
     hasher.update(ser);
     let hash = hasher.finalize();
     let prefix_dirs: Vec<String> = hash.iter().map(|b| const_hex::encode([*b])).collect();
-    assert_eq!(prefix_dirs.len(), 3, "path should have 3 prefix dirs, not {}", prefix_dirs.len());
+    assert_eq!(
+        prefix_dirs.len(),
+        3,
+        "path should have 3 prefix dirs, not {}",
+        prefix_dirs.len()
+    );
 
     let mut out = dir.to_owned();
     for prefix in prefix_dirs {
@@ -80,11 +90,19 @@ fn deserialize_cachemeta(data: &[u8]) -> Result<CacheMeta> {
 }
 
 impl FileStorage {
-    pub fn new(path: PathBuf, read_size: usize) -> io::Result<Self> {
+    pub fn new(path: PathBuf, max_size: usize, read_size: usize) -> io::Result<Self> {
         if !path.exists() {
             std::fs::create_dir_all(&path)?;
         }
-        Ok(Self { path, read_size })
+        Ok(Self {
+            path,
+            max_size,
+            read_size,
+        })
+    }
+
+    pub fn max_file_size_bytes(&self) -> usize {
+        self.max_size
     }
 
     fn final_data_path(&'static self, key: &CompactCacheKey) -> Result<PathBuf> {
@@ -186,15 +204,16 @@ fn content_length(meta: &CacheMeta) -> Option<u64> {
 
 fn is_chunked_encoding(meta: &CacheMeta) -> bool {
     meta.response_header()
-    .headers
-    .get("Transfer-Encoding").is_some_and(|h| b"chunked".eq_ignore_ascii_case(h.as_bytes()))
+        .headers
+        .get("Transfer-Encoding")
+        .is_some_and(|h| b"chunked".eq_ignore_ascii_case(h.as_bytes()))
 }
 
 fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
     let Some(header_size) = content_length(meta) else {
         // TODO determine content-length for responses with chunked encoding
         if is_chunked_encoding(meta) {
-            return Ok(true)
+            return Ok(true);
         }
         return Err(Error::explain(
             ErrorType::InternalError,

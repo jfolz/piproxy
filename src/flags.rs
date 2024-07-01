@@ -1,5 +1,5 @@
 use clap::builder::TypedValueParser;
-use clap::{Parser, builder::PossibleValuesParser};
+use clap::{builder::PossibleValuesParser, Parser};
 use log::LevelFilter;
 use pingora::server::configuration::Opt;
 use pingora::server::configuration::ServerConf;
@@ -13,12 +13,10 @@ use std::path::PathBuf;
 use std::str;
 use std::str::FromStr;
 
-use crate::defaults::DEFAULT_ADDRESS;
-use crate::defaults::DEFAULT_CACHE_PATH;
-use crate::defaults::DEFAULT_CACHE_SIZE;
-use crate::defaults::DEFAULT_CACHE_TIMEOUT;
-use crate::defaults::DEFAULT_LOG_LEVEL;
-use crate::defaults::DEFAULT_READ_SIZE;
+use crate::defaults::{
+    DEFAULT_ADDRESS, DEFAULT_CACHE_PATH, DEFAULT_CACHE_RATIO, DEFAULT_CACHE_SIZE,
+    DEFAULT_CACHE_TIMEOUT, DEFAULT_LOG_LEVEL, DEFAULT_READ_SIZE,
+};
 
 #[derive(Debug, Clone)]
 pub struct Unit(pub usize);
@@ -110,6 +108,9 @@ fn default_cache_path() -> PathBuf {
 fn default_cache_size() -> usize {
     DEFAULT_CACHE_SIZE
 }
+fn default_cache_ratio() -> f64 {
+    DEFAULT_CACHE_RATIO
+}
 fn default_read_size() -> usize {
     DEFAULT_READ_SIZE
 }
@@ -124,7 +125,7 @@ where
     Unit::deserialize(deserializer).map(Unit::into)
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub upgrade: bool,
@@ -140,6 +141,8 @@ pub struct Config {
     pub cache_path: PathBuf,
     #[serde(default = "default_cache_size", deserialize_with = "deserialize_unit")]
     pub cache_size: usize,
+    #[serde(default = "default_cache_ratio")]
+    pub cache_ratio: f64,
     #[serde(default = "default_cache_timeout")]
     pub cache_timeout: u64,
     #[serde(default = "default_read_size", deserialize_with = "deserialize_unit")]
@@ -158,6 +161,7 @@ impl Default for Config {
             address: DEFAULT_ADDRESS.to_owned(),
             cache_path: DEFAULT_CACHE_PATH.into(),
             cache_size: DEFAULT_CACHE_SIZE,
+            cache_ratio: DEFAULT_CACHE_RATIO,
             cache_timeout: DEFAULT_CACHE_TIMEOUT,
             read_size: DEFAULT_READ_SIZE,
             pingora: ServerConf::default(),

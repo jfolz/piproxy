@@ -22,9 +22,11 @@ fn main() {
     proxy::setup(
         conf.cache_path.clone(),
         conf.cache_size,
+        conf.cache_ratio,
         conf.cache_timeout,
         conf.read_size,
-    );
+    )
+    .unwrap();
     proxy::populate_lru(&conf.cache_path).unwrap();
 
     let mut my_server = Server::new_with_opt_and_conf(conf.opt(), conf.pingora);

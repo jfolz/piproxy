@@ -36,8 +36,32 @@ const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
-pub fn setup(cache_path: PathBuf, cache_size: usize, cache_timeout: u64, read_size: usize) {
-    let storage = match FileStorage::new(cache_path, read_size) {
+#[allow(clippy::cast_sign_loss)]
+#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_possible_truncation)]
+fn calc_max_size(cache_size: usize, cache_ratio: f64) -> io::Result<usize> {
+    let out = cache_size as f64 * cache_ratio;
+    if out > usize::MAX as f64 || out < usize::MIN as f64 {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cache_size {cache_size} * {cache_ratio} = {out}, which does not fit into usize"
+            ),
+        ))
+    } else {
+        Ok(out as usize)
+    }
+}
+
+pub fn setup(
+    cache_path: PathBuf,
+    cache_size: usize,
+    cache_ratio: f64,
+    cache_timeout: u64,
+    read_size: usize,
+) -> io::Result<()> {
+    let max_size = calc_max_size(cache_size, cache_ratio)?;
+    let storage = match FileStorage::new(cache_path, max_size, read_size) {
         Ok(storage) => storage,
         Err(err) => {
             panic!("cannot create cache storage: {err}");
@@ -54,6 +78,7 @@ pub fn setup(cache_path: PathBuf, cache_size: usize, cache_timeout: u64, read_si
     let timeout = Duration::from_secs(cache_timeout);
     let cache_lock = CacheLock::new(timeout);
     assert!(CACHE_LOCK.set(cache_lock).is_ok(), "cache lock already set");
+    Ok(())
 }
 
 fn has_extension<'a, I>(entry: &DirEntry, exts: I) -> bool
@@ -311,6 +336,9 @@ impl ProxyHttp for PyPI<'_> {
         let Some(storage) = STORAGE.get() else {
             return Ok(());
         };
+        session
+            .cache
+            .set_max_file_size_bytes(storage.max_file_size_bytes());
         session.cache.enable(
             // storage: the cache storage backend that implements storage::Storage
             storage,
