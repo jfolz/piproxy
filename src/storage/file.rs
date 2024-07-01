@@ -184,7 +184,17 @@ fn content_length(meta: &CacheMeta) -> Option<u64> {
         .and_then(|s| s.parse().ok())
 }
 
+fn is_chunked_encoding(meta: &CacheMeta) -> bool {
+    meta.response_header()
+    .headers
+    .get("Transfer-Encoding").is_some_and(|h| h == "Chunked")
+}
+
 fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
+    // TODO determine content-length for responses with chunked encoding
+    if is_chunked_encoding(meta) {
+        return Ok(true)
+    }
     let Some(header_size) = content_length(meta) else {
         return Err(Error::explain(
             ErrorType::InternalError,
