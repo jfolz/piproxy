@@ -187,19 +187,20 @@ fn content_length(meta: &CacheMeta) -> Option<u64> {
 fn is_chunked_encoding(meta: &CacheMeta) -> bool {
     meta.response_header()
     .headers
-    .get("Transfer-Encoding").is_some_and(|h| h == "Chunked")
+    .get("Transfer-Encoding").is_some_and(|h| b"chunked".eq_ignore_ascii_case(h.as_bytes()))
 }
 
 fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
-    // TODO determine content-length for responses with chunked encoding
-    if is_chunked_encoding(meta) {
-        return Ok(true)
-    }
     let Some(header_size) = content_length(meta) else {
-        return Err(Error::explain(
-            ErrorType::InternalError,
-            "cannot determine content-length",
-        ));
+        // TODO determine content-length for responses with chunked encoding
+        if is_chunked_encoding(meta) {
+            return Ok(true)
+        } else {
+            return Err(Error::explain(
+                ErrorType::InternalError,
+                "cannot determine content-length",
+            ));
+        }
     };
     let file_size = path
         .metadata()
