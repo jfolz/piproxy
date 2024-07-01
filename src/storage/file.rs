@@ -28,11 +28,26 @@ pub struct FileStorage {
     read_size: usize,
 }
 
+use blake2::{Blake2b, Digest};
+
+pub(crate) type Blake2b32 = Blake2b<blake2::digest::consts::U3>;
+
 fn path_from_key(dir: &Path, key: &CompactCacheKey, suffix: &str) -> Result<PathBuf> {
     let ser = rmp_serde::to_vec(&key).map_err(|err| perror("cannot serialize cachekey", err))?;
-    let ser = const_hex::encode(ser);
-    assert_eq!(ser.len() % 2, 0, "path encodes to odd length hex {ser}");
-    Ok(dir.join(ser + suffix))
+    let hex_ser = const_hex::encode(&ser);
+    assert_eq!(hex_ser.len() % 2, 0, "path encodes to odd length hex {hex_ser}");
+
+    let mut hasher = Blake2b32::new();
+    hasher.update(ser);
+    let hash = hasher.finalize();
+    let prefix_dirs: Vec<String> = hash.iter().map(|b| const_hex::encode(&[*b])).collect();
+    assert_eq!(prefix_dirs.len(), 3, "path should have 3 prefix dirs, not {}", prefix_dirs.len());
+
+    let mut out = dir.to_owned();
+    for prefix in prefix_dirs {
+        out = out.join(prefix);
+    }
+    Ok(out.join(hex_ser + suffix))
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -105,6 +120,7 @@ impl FileStorage {
     async fn put_cachemeta(&'static self, key: &CompactCacheKey, meta: &CacheMeta) -> Result<()> {
         let data = serialize_cachemeta(meta)?;
         let path = self.meta_path(key)?;
+        ensure_parent_dirs_exist(&path).await?;
         let mut fp = OpenOptions::new()
             .create(true)
             .truncate(true)
