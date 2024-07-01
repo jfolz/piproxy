@@ -40,7 +40,7 @@ fn path_from_key(dir: &Path, key: &CompactCacheKey, suffix: &str) -> Result<Path
     let mut hasher = Blake2b32::new();
     hasher.update(ser);
     let hash = hasher.finalize();
-    let prefix_dirs: Vec<String> = hash.iter().map(|b| const_hex::encode(&[*b])).collect();
+    let prefix_dirs: Vec<String> = hash.iter().map(|b| const_hex::encode([*b])).collect();
     assert_eq!(prefix_dirs.len(), 3, "path should have 3 prefix dirs, not {}", prefix_dirs.len());
 
     let mut out = dir.to_owned();
@@ -195,12 +195,11 @@ fn has_correct_size(meta: &CacheMeta, path: &Path) -> Result<bool> {
         // TODO determine content-length for responses with chunked encoding
         if is_chunked_encoding(meta) {
             return Ok(true)
-        } else {
-            return Err(Error::explain(
-                ErrorType::InternalError,
-                "cannot determine content-length",
-            ));
         }
+        return Err(Error::explain(
+            ErrorType::InternalError,
+            "cannot determine content-length",
+        ));
     };
     let file_size = path
         .metadata()

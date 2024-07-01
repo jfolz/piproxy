@@ -13,7 +13,7 @@ fn main() {
     let conf = match flags::Config::new_from_env() {
         Ok(conf) => conf,
         Err(err) => {
-            println!("{:?}", err);
+            println!("{err:?}");
             exit(1);
         }
     };

@@ -35,9 +35,9 @@ impl FromStr for Unit {
     }
 }
 
-impl Into<usize> for Unit {
-    fn into(self) -> usize {
-        self.0
+impl From<Unit> for usize {
+    fn from(value: Unit) -> Self {
+        value.0
     }
 }
 
@@ -54,7 +54,7 @@ impl<'de> Visitor<'de> for UnitVisitor {
     where
         E: de::Error,
     {
-        Unit::from_str(&value).map_err(|_| E::invalid_value(de::Unexpected::Str(value), &self))
+        Unit::from_str(value).map_err(|_| E::invalid_value(de::Unexpected::Str(value), &self))
     }
 }
 
@@ -119,7 +119,7 @@ fn deserialize_unit<'de, D>(deserializer: D) -> Result<usize, D::Error>
 where
     D: Deserializer<'de>,
 {
-    Unit::deserialize(deserializer).map(|u| u.into())
+    Unit::deserialize(deserializer).map(Unit::into)
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
