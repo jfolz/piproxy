@@ -1,6 +1,9 @@
 use log::LevelFilter;
 use pingora::server::configuration::Opt;
 use pingora::server::configuration::ServerConf;
+use serde::de::Expected;
+use serde::de::{self, Visitor};
+use serde::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -36,6 +39,31 @@ impl FromStr for Unit {
 impl Into<usize> for Unit {
     fn into(self) -> usize {
         self.0
+    }
+}
+
+struct UnitVisitor;
+
+impl<'de> Visitor<'de> for UnitVisitor {
+    type Value = Unit;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(formatter, "a number with unit (15M, 7G, 1T, ...)")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Unit::from_str(&value).map_err(|_| E::invalid_value(de::Unexpected::Str(value), &self))
+    }
+}
+
+impl<'de> Deserialize<'de> for Unit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de> {
+        deserializer.deserialize_any(UnitVisitor)
     }
 }
 
@@ -75,6 +103,10 @@ fn default_cache_size() -> usize { DEFAULT_CACHE_SIZE }
 fn default_read_size() -> usize { DEFAULT_READ_SIZE }
 fn default_cache_timeout() -> u64 { DEFAULT_CACHE_TIMEOUT }
 
+fn deserialize_unit<'de, D>(deserializer: D) -> Result<usize, D::Error> where D: Deserializer<'de> {
+    Unit::deserialize(deserializer).map(|u| u.into())
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -89,11 +121,11 @@ pub struct Config {
     pub address: String,
     #[serde(default = "default_cache_path")]
     pub cache_path: PathBuf,
-    #[serde(default = "default_cache_size")]
+    #[serde(default = "default_cache_size", deserialize_with="deserialize_unit")]
     pub cache_size: usize,
     #[serde(default = "default_cache_timeout")]
     pub cache_timeout: u64,
-    #[serde(default = "default_read_size")]
+    #[serde(default = "default_read_size", deserialize_with="deserialize_unit")]
     pub read_size: usize,
     #[serde(default)]
     pub pingora: ServerConf,
