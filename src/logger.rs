@@ -1,22 +1,19 @@
-use std::io;
 use log::{LevelFilter, Metadata, Record, SetLoggerError};
+use std::io;
 use systemd_journal_logger::JournalLog;
 
 use crate::defaults::DEFAULT_LOG_LEVEL;
 
 pub struct Logger {}
 
-fn fromsetloggererror(err: SetLoggerError) -> io::Error {
-    io::Error::new(io::ErrorKind::AlreadyExists, err.to_string())
-}
-
 pub fn install(journal: bool) -> io::Result<()> {
     set_level(DEFAULT_LOG_LEVEL);
     if journal {
-        JournalLog::new()?.install().map_err(fromsetloggererror)
+        JournalLog::new()?.install()
     } else {
-        Logger::new().install().map_err(fromsetloggererror)
+        Logger::new().install()
     }
+    .map_err(|err| io::Error::new(io::ErrorKind::AlreadyExists, err.to_string()))
 }
 
 pub fn set_level(level: LevelFilter) {
@@ -25,7 +22,7 @@ pub fn set_level(level: LevelFilter) {
 
 impl Logger {
     fn new() -> Logger {
-        Self{}
+        Self {}
     }
 
     fn install(self) -> Result<(), SetLoggerError> {
@@ -34,7 +31,6 @@ impl Logger {
 }
 
 impl log::Log for Logger {
-
     fn enabled(&self, metadata: &Metadata) -> bool {
         metadata.level() <= log::max_level()
     }

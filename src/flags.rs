@@ -68,6 +68,7 @@ impl<'de> Deserialize<'de> for Unit {
 }
 
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Args {
     /// Path to config file
     #[arg(short, long)]
@@ -142,6 +143,7 @@ where
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     #[serde(default)]
     pub upgrade: bool,
