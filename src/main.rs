@@ -1,5 +1,5 @@
 use pingora::prelude::*;
-use std::process::exit;
+use std::{io, process::exit};
 
 mod defaults;
 mod error;
@@ -8,13 +8,18 @@ mod logger;
 mod proxy;
 mod storage;
 
-fn main() {
-    logger::install().unwrap();
+fn main() -> io::Result<()> {
     let conf = match flags::Config::new_from_env() {
         Ok(conf) => conf,
         Err(err) => {
             println!("{err:?}");
             exit(1);
+        }
+    };
+    if let Err(err) = logger::install(conf.journal) {
+        if conf.journal {
+            log::error!("Could not connect to the journal, falling back to stdout: {err}");
+            logger::install(false)?;
         }
     };
     logger::set_level(conf.log_level);
@@ -25,9 +30,8 @@ fn main() {
         conf.cache_ratio,
         conf.cache_timeout,
         conf.read_size,
-    )
-    .unwrap();
-    proxy::populate_lru(&conf.cache_path).unwrap();
+    )?;
+    proxy::populate_lru(&conf.cache_path)?;
 
     let mut my_server = Server::new_with_opt_and_conf(conf.opt(), conf.pingora);
     my_server.bootstrap();

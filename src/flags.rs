@@ -78,6 +78,9 @@ pub struct Args {
     /// Daemonize on launch
     #[arg(short, long)]
     pub daemon: bool,
+    /// Send output to journal
+    #[arg(short, long)]
+    pub journal: bool,
     /// Test the configuration
     #[arg(short, long)]
     pub test: bool,
@@ -146,6 +149,8 @@ pub struct Config {
     pub daemon: bool,
     #[serde(default)]
     pub test: bool,
+    #[serde(default)]
+    pub journal: bool,
     #[serde(default = "default_log_level")]
     pub log_level: LevelFilter,
     #[serde(default = "default_address")]
@@ -170,6 +175,7 @@ impl Default for Config {
             upgrade: false,
             daemon: false,
             test: false,
+            journal: false,
             log_level: DEFAULT_LOG_LEVEL,
             address: DEFAULT_ADDRESS.to_owned(),
             cache_path: DEFAULT_CACHE_PATH.into(),
@@ -205,6 +211,7 @@ impl Config {
         self.upgrade |= args.upgrade;
         self.daemon |= args.daemon;
         self.test |= args.test;
+        self.journal |= args.journal;
 
         // update optionals
         macro_rules! update_values {
