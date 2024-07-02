@@ -41,7 +41,7 @@ impl PartialFileHitHandler {
         let read_timeout = Duration::from_millis(10);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let max_unsuccessful_reads =
-            (Duration::from_secs(5).as_secs_f64() / read_timeout.as_secs_f64()).ceil() as usize;
+            (Duration::from_secs(30).as_secs_f64() / read_timeout.as_secs_f64()).ceil() as usize;
         if max_unsuccessful_reads == 0 {
             return Err(Error::explain(
                 ErrorType::InternalError,
