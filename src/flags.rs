@@ -68,6 +68,7 @@ impl<'de> Deserialize<'de> for Unit {
 }
 
 #[derive(Parser, Debug)]
+#[command(version)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Args {
     /// Path to config file
