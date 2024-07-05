@@ -13,10 +13,10 @@ rust:
     - cargo test --verbose
     - cargo build --verbose --release
     - cargo test --verbose --release
-    - cargo build --verbose --profile release-min
-    - cargo test --verbose --profile release-min
+    - cargo build --verbose --profile prod
+    - cargo test --verbose --profile prod
   artifacts:
     paths:
     - target/debug/piproxy
     - target/release/piproxy
-    - target/release-min/piproxy
+    - target/prod/piproxy

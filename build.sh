@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PROFILE=${PROFILE:-release-min}
+PROFILE=${PROFILE:-prod}
 CONTAINER=${CONTAINER:-extract-piproxy-binary}
 
 docker build --build-arg PROFILE=$PROFILE -t piproxy .

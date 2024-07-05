@@ -1,6 +1,6 @@
 [package]
 name = "piproxy"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -27,7 +27,7 @@ tokio = { version = "1", features = ["rt", "fs", "time"] }
 inherits = "release"
 debug = true
 
-[profile.release-min]
+[profile.prod]
 inherits = "release"
 strip = true      # Automatically strip symbols from the binary.
 lto = true        # Enable LTO
