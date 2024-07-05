@@ -13,13 +13,28 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Rust build
+        with:
+          fetch-depth: 0
+      - name: Determine archive name
+        run: |
+          ARCHIVE_NAME=${{ github.event.repository.name }}-linux-$(uname -m)
+          if [ "${GITHUB_REF_TYPE}" == "tag" ]; then
+            GIT_VERSION=$(git describe --tags)
+          else
+            GIT_VERSION=$(git describe --long --always)
+          fi
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}-${GIT_VERSION}" >> $GITHUB_ENV
+      - name: Build
         run: ./build.sh
+      - name: Create artifacts archive
+        run: |
+          mkdir artifacts
+          tar -cJf artifacts/${ARCHIVE_NAME}.tar.xz dist/*
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: artifacts
+          path: artifacts/piproxy.tar.xz
   create_release:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build-rust]
