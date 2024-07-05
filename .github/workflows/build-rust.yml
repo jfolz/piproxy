@@ -34,7 +34,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: artifacts
-          path: artifacts/piproxy.tar.xz
+          path: artifacts/*
   create_release:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build-rust]
