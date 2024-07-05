@@ -23,7 +23,7 @@ jobs:
           else
             GIT_VERSION=$(git describe --long --always)
           fi
-          echo "ARCHIVE_NAME=${ARCHIVE_NAME}-${GIT_VERSION}" >> $GITHUB_ENV
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}-v${GIT_VERSION}" >> $GITHUB_ENV
       - name: Build
         run: ./build.sh
       - name: Create artifacts archive
