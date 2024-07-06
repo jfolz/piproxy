@@ -1,0 +1,20 @@
+[Unit]
+Description={{ service }} Pip/PyPI Cache
+After=network.target
+
+[Service]
+Type=forking
+User={{ user }}
+Group={{ group }}
+PIDFile={{ pingora.pidfile }}
+ExecStartPre=+/usr/bin/mkdir -p {{ pingora.pidfile | dirname }}
+ExecStartPre=+/usr/bin/chown {{ user }}:{{ group }} {{ pingora.pidfile | dirname }}
+ExecStartPre=+/usr/bin/chmod 0700 {{ pingora.pidfile | dirname }}
+ExecStart=/usr/local/bin/piproxy-prod -j -d -c {{ config }}
+ExecReload=kill -QUIT $MAINPID
+ExecReload=/usr/local/bin/piproxy-prod -j -d -u -c {{ config }}
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

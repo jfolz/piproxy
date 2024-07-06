@@ -1,0 +1,15 @@
+galaxy_info:
+  author: Joachim Folz
+  description: Install piproxy caching PyPI proxy based on Cloudflare Pingora
+  company: DFKI
+  # If the issue tracker for your role is not on github, uncomment the
+  # next line and provide a value
+  # issue_tracker_url: http://example.com/issue/tracker
+  license: MIT
+  min_ansible_version: "2.1"
+  galaxy_tags:
+    - PyPI
+    - cache
+    - proxy
+    - pingora
+dependencies: []
