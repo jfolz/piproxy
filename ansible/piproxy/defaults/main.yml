@@ -2,7 +2,6 @@
 # defaults file for piproxy
 version: 0.1.2
 service: piproxy
-config: /etc/piproxy/config.yml
 user: piproxy
 group: piproxy
 address: 0.0.0.0:8080
@@ -11,5 +10,4 @@ cache_size: 20G
 read_size: 256k
 log_level: info
 pingora:
-  pidfile: /run/piproxy/piproxy.pid
   threads: 4

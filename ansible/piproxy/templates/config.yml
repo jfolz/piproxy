@@ -4,4 +4,5 @@ cache_size: {{ cache_size }}
 read_size: {{ read_size }}
 log_level: {{ log_level }}
 pingora:
+  pidfile: /run/{{ service }}/{{ service }}.pid
 {{ pingora | to_nice_yaml(indent=2) | indent(2) }}

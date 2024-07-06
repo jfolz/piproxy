@@ -19,21 +19,19 @@
 
 - name: Create config directory
   ansible.builtin.file:
-    path: {{ config | dirname }}
+    path: /etc/{{ service }}
+    owner: {{ user }}
+    group: {{ group }}
+    mode: 0700
     state: directory
 
 - name: Install config file
   ansible.builtin.template:
     src: templates/config.yml
-    dest: {{ config }}
+    dest: /etc/{{ service }}/config.yml
     owner: {{ user }}
     group: {{ group }}
     mode: 0400
-
-- name: Add tmpfiles.d config for pidfile directory
-  ansible.builtin.template:
-    src: templates/piproxy-pidfile.conf
-    dest: /etc/tmpfiles.d/{{ service }}-pidfile.conf
 
 - name: Install service file
   ansible.builtin.template:
