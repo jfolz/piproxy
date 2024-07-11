@@ -15,7 +15,7 @@ use std::{
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::metrics::METRIC_CACHE_LOOKUP_ERRORS;
+use crate::metrics::{METRIC_CACHE_LOOKUP_ERRORS, METRIC_CACHE_META_UPDATES, METRIC_WARN_MISSING_DATA_FILE, METRIC_WARN_STALE_PARTIAL_EXISTS};
 
 use super::hithandler::FileHitHandler;
 use super::misshandler::FileMissHandler;
@@ -297,18 +297,23 @@ impl Storage for FileStorage {
                 let final_path = cp.final_data();
                 let partial_path = cp.partial_data();
                 if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
-                    METRIC_CACHE_HITS.inc();
                     let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                    METRIC_CACHE_HITS.inc();
                     Ok(Some((meta, h)))
                 } else if exists(&partial_path).await? {
                     // only return partial hit if partial file has been written to recently
-                    let h = match recently_updated(&partial_path).await {
-                        Ok(true) => Box::new(
-                            PartialFileHitHandler::new(partial_path, final_path, self.read_size)
-                                .await?,
-                        ),
+                    match recently_updated(&partial_path).await {
+                        Ok(true) => {
+                            let h = Box::new(
+                                PartialFileHitHandler::new(partial_path, final_path, self.read_size)
+                                    .await?,
+                            );
+                            METRIC_CACHE_HITS_PARTIAL.inc();
+                            return Ok(Some((meta, h)))
+                        },
                         Ok(false) => {
                             METRIC_CACHE_MISSES.inc();
+                            METRIC_WARN_STALE_PARTIAL_EXISTS.inc();
                             log::warn!(
                                 "partial data file {} exists, but has not been written to recently",
                                 partial_path.to_string_lossy()
@@ -316,19 +321,20 @@ impl Storage for FileStorage {
                             return Ok(None);
                         }
                         Err(err) => {
+                            METRIC_CACHE_MISSES.inc();
+                            METRIC_CACHE_LOOKUP_ERRORS.inc();
                             return e_perror("cannot determine modified time of partial file", err)
                         }
                     };
-                    METRIC_CACHE_HITS_PARTIAL.inc();
-                    Ok(Some((meta, h)))
                 } else {
                     // check again if final file now exists
                     if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
-                        METRIC_CACHE_HITS.inc();
                         let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                        METRIC_CACHE_HITS.inc();
                         Ok(Some((meta, h)))
                     } else {
                         METRIC_CACHE_MISSES.inc();
+                        METRIC_WARN_MISSING_DATA_FILE.inc();
                         log::warn!(
                             "cachemeta {} exists, but no corresponding data file found",
                             meta_path.to_string_lossy()
@@ -338,10 +344,11 @@ impl Storage for FileStorage {
                 }
             }
             Ok(None) => {
-                METRIC_CACHE_HITS_PARTIAL.inc();
+                METRIC_CACHE_MISSES.inc();
                 Ok(None)
             }
             Err(err) => {
+                METRIC_CACHE_MISSES.inc();
                 METRIC_CACHE_LOOKUP_ERRORS.inc();
                 Err(err)
             }
@@ -394,6 +401,7 @@ impl Storage for FileStorage {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<bool> {
+        METRIC_CACHE_META_UPDATES.inc();
         let cp = self.cache_path(key)?;
         put_cachemeta(meta, &cp.meta()).await?;
         Ok(true)
