@@ -12,7 +12,7 @@ use pingora::{
     http::{ResponseHeader, StatusCode},
     prelude::*,
 };
-use prometheus::{core::Collector, PullingGauge};
+use prometheus::PullingGauge;
 use std::{
     any::{Any, TypeId},
     fs::{self, DirEntry},
@@ -73,8 +73,9 @@ fn calc_max_size(cache_size: usize, cache_ratio: u8) -> io::Result<usize> {
     }
 }
 
-fn register_metric(c: Box<dyn Collector>) -> io::Result<()> {
-    prometheus::register(c).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+fn register_metric(name: &str, help: &str, f: &'static (dyn Fn() -> f64 + Sync + Send)) -> io::Result<()> {
+    let metric = PullingGauge::new(name, help, Box::new(f)).unwrap();
+    prometheus::register(Box::new(metric)).map_err(move |e| io::Error::new(io::ErrorKind::Other, e))
 }
 
 pub fn setup(
@@ -103,34 +104,26 @@ pub fn setup(
     let cache_lock = CacheLock::new(timeout);
     assert!(CACHE_LOCK.set(cache_lock).is_ok(), "cache lock already set");
 
-    // TODO fix metrics so they actually reflect the state of the cache
-    let metric_cached_items = PullingGauge::new(
+    register_metric(
         "piproxy_cached_items",
         "The available parallelism, usually the numbers of logical cores.",
-        Box::new(cached_items)
-    ).unwrap();
-    register_metric(Box::new(metric_cached_items))?;
-
-    let metric_cached_size = PullingGauge::new(
+        &cached_items,
+    )?;
+    register_metric(
         "piproxy_cached_bytes",
         "The available parallelism, usually the numbers of logical cores.",
-        Box::new(cached_bytes)
-    ).unwrap();
-    register_metric(Box::new(metric_cached_size))?;
-
-    let metric_evicted_items = PullingGauge::new(
+        &cached_bytes,
+    )?;
+    register_metric(
         "piproxy_evicted_items",
         "The available parallelism, usually the numbers of logical cores.",
-        Box::new(evicted_items)
-    ).unwrap();
-    register_metric(Box::new(metric_evicted_items))?;
-
-    let metric_evicted_size = PullingGauge::new(
+        &evicted_items,
+    )?;
+    register_metric(
         "piproxy_evicted_bytes",
         "The available parallelism, usually the numbers of logical cores.",
-        Box::new(evicted_bytes)
-    ).unwrap();
-    register_metric(Box::new(metric_evicted_size))?;
+        &evicted_bytes,
+    )?;
 
     Ok(())
 }
@@ -146,7 +139,7 @@ where
 }
 
 fn is_entry(entry: &DirEntry) -> bool {
-    has_extension(entry, [".data"])
+    has_extension(entry, ["data"])
 }
 
 fn key_from_entry(entry: &DirEntry) -> io::Result<CompactCacheKey> {
