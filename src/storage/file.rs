@@ -167,10 +167,21 @@ impl FileStorage {
 
     pub fn purge_sync(&'static self, key: &CompactCacheKey) -> Result<bool> {
         let cache_path = self.cache_path_compact(key)?;
+
+        // error if partial data path exists
+        let partial_data_path = cache_path.partial_data();
+        if partial_data_path.exists() {
+            return Err(pingora::Error::explain(
+                pingora::ErrorType::InternalError,
+                format!(
+                    "Cannot purge because partial data file exists {}",
+                    partial_data_path.to_string_lossy()
+                ),
+            ));
+        }
+
         let final_data_path = cache_path.final_data();
         let meta_path = cache_path.meta();
-        // TODO check if partial data exists and is fresh, return error if it does
-        let partial_data_path = cache_path.partial_data();
         log::info!("purge {}", final_data_path.to_string_lossy());
         let err_meta = std::fs::remove_file(&meta_path);
         let err_data = std::fs::remove_file(&final_data_path);
