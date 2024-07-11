@@ -7,6 +7,8 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
+use crate::metrics::METRIC_UPSTREAM_BYTES;
+
 use super::super::error::{e_perror, perror};
 
 pub struct FileMissHandler {
@@ -47,7 +49,9 @@ impl HandleMiss for FileMissHandler {
     async fn write_body(&mut self, data: bytes::Bytes, _eof: bool) -> Result<()> {
         match self.fp.write_all(&data).await {
             Ok(()) => {
-                self.written += data.len();
+                let n = data.len();
+                METRIC_UPSTREAM_BYTES.inc_by(n as u64);
+                self.written += n;
                 Ok(())
             }
             Err(err) => e_perror("error writing to cache", err),

@@ -19,6 +19,22 @@ pub static METRIC_REQUEST_ERROR_COUNT: Lazy<IntCounter> = Lazy::new(||
     .unwrap()
 );
 
+pub static METRIC_UPSTREAM_BYTES: Lazy<IntCounter> = Lazy::new(|| 
+    register_int_counter!(
+        "piproxy_upstream_bytes",
+        "Number of bytes downloaded from upstream"
+    )
+    .unwrap()
+);
+
+pub static METRIC_DOWNSTREAM_BYTES: Lazy<IntCounter> = Lazy::new(|| 
+    register_int_counter!(
+        "piproxy_downstream_bytes",
+        "Number of bytes sent to downstream"
+    )
+    .unwrap()
+);
+
 pub static METRIC_CACHE_HITS: Lazy<IntCounter> = Lazy::new(|| 
     register_int_counter!(
         "piproxy_cache_hit_count",
@@ -94,6 +110,8 @@ pub static METRIC_WARN_MISSING_DATA_FILE: Lazy<IntCounter> = Lazy::new(||
 pub fn unlazy() {
     METRIC_REQUEST_COUNT.get();
     METRIC_REQUEST_ERROR_COUNT.get();
+    METRIC_UPSTREAM_BYTES.get();
+    METRIC_DOWNSTREAM_BYTES.get();
     METRIC_CACHE_HITS.get();
     METRIC_CACHE_HITS_FULL.get();
     METRIC_CACHE_HITS_PARTIAL.get();

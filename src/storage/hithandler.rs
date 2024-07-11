@@ -11,6 +11,8 @@ use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
 };
 
+use crate::metrics::METRIC_DOWNSTREAM_BYTES;
+
 use super::super::error::{e_perror, perror};
 
 pub struct FileHitHandler {
@@ -40,6 +42,7 @@ impl HandleHit for FileHitHandler {
         match self.fp.read(buf.as_mut()).await {
             Ok(n) => {
                 if n > 0 {
+                    METRIC_DOWNSTREAM_BYTES.inc_by(n as u64);
                     let buf = buf.freeze();
                     Ok(Some(buf.slice(..n)))
                 } else {

@@ -12,6 +12,8 @@ use tokio::{
     time::timeout,
 };
 
+use crate::metrics::METRIC_DOWNSTREAM_BYTES;
+
 use super::super::error::{e_perror, perror};
 
 pub struct PartialFileHitHandler {
@@ -76,6 +78,7 @@ impl HandleHit for PartialFileHitHandler {
                     match result {
                         Ok(n) => {
                             if n > 0 {
+                                METRIC_DOWNSTREAM_BYTES.inc_by(n as u64);
                                 let buf = buf.freeze();
                                 return Ok(Some(buf.slice(..n)));
                             } else if self.is_final {
