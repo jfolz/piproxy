@@ -33,31 +33,83 @@ use blake2::{Blake2b, Digest};
 
 pub(crate) type Blake2b32 = Blake2b<blake2::digest::consts::U3>;
 
-fn path_from_key(dir: &Path, key: &CompactCacheKey, suffix: &str) -> Result<PathBuf> {
-    let ser = rmp_serde::to_vec(&key).map_err(|err| perror("cannot serialize cachekey", err))?;
-    let hex_ser = const_hex::encode(&ser);
-    assert_eq!(
-        hex_ser.len() % 2,
-        0,
-        "path encodes to odd length hex {hex_ser}"
-    );
+struct CachePath {
+    base: PathBuf,
+}
 
-    let mut hasher = Blake2b32::new();
-    hasher.update(ser);
-    let hash = hasher.finalize();
-    let prefix_dirs: Vec<String> = hash.iter().map(|b| const_hex::encode([*b])).collect();
-    assert_eq!(
-        prefix_dirs.len(),
-        3,
-        "path should have 3 prefix dirs, not {}",
-        prefix_dirs.len()
-    );
+impl CachePath {
+    fn new(dir: &Path, key: &CompactCacheKey) -> Result<Self> {
+        let ser =
+            rmp_serde::to_vec(&key).map_err(|err| perror("cannot serialize cachekey", err))?;
+        let hex_ser = const_hex::encode(&ser);
+        assert_eq!(
+            hex_ser.len() % 2,
+            0,
+            "path encodes to odd length hex {hex_ser}"
+        );
 
-    let mut out = dir.to_owned();
-    for prefix in prefix_dirs {
-        out = out.join(prefix);
+        let mut hasher = Blake2b32::new();
+        hasher.update(ser);
+        let hash = hasher.finalize();
+        let prefix_dirs: Vec<String> = hash.iter().map(|b| const_hex::encode([*b])).collect();
+        assert_eq!(
+            prefix_dirs.len(),
+            3,
+            "path should have 3 prefix dirs, not {}",
+            prefix_dirs.len()
+        );
+
+        let mut out = dir.to_owned();
+        for prefix in prefix_dirs {
+            out = out.join(prefix);
+        }
+        Ok(Self {
+            base: out.join(hex_ser),
+        })
     }
-    Ok(out.join(hex_ser + suffix))
+
+    fn meta(&self) -> PathBuf {
+        self.base.with_extension("meta")
+    }
+
+    fn final_data(&self) -> PathBuf {
+        self.base.with_extension("data")
+    }
+
+    fn partial_data(&self) -> PathBuf {
+        self.base.with_extension("partial")
+    }
+}
+
+async fn get_cachemeta(path: &Path) -> Result<Option<CacheMeta>> {
+    match File::open(path).await {
+        Ok(mut fp) => {
+            let mut data = Vec::new();
+            match fp.read_to_end(&mut data).await {
+                Ok(_) => Ok(Some(deserialize_cachemeta(&data)?)),
+                Err(err) => e_perror("error reading cachemeta", err),
+            }
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => e_perror("error opening cachemeta", err),
+    }
+}
+
+async fn put_cachemeta(meta: &CacheMeta, path: &Path) -> Result<()> {
+    let data = serialize_cachemeta(meta)?;
+    ensure_parent_dirs_exist(&path).await?;
+    let mut fp = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .read(false)
+        .write(true)
+        .open(path)
+        .await
+        .map_err(|err| perror("error opening file", err))?;
+    fp.write_all(&data)
+        .await
+        .map_err(|err| perror("error writing to file", err))?;
+    Ok(())
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -105,76 +157,35 @@ impl FileStorage {
         self.max_size
     }
 
-    fn final_data_path(&'static self, key: &CompactCacheKey) -> Result<PathBuf> {
-        // TODO encode .data in type system?
-        path_from_key(&self.path, key, ".data")
+    fn cache_path(&self, key: &CacheKey) -> Result<CachePath> {
+        CachePath::new(&self.path, &key.to_compact())
     }
 
-    fn partial_data_path(&'static self, key: &CompactCacheKey) -> Result<PathBuf> {
-        // TODO encode .partial in type system?
-        path_from_key(&self.path, key, ".partial")
-    }
-
-    fn meta_path(&'static self, key: &CompactCacheKey) -> Result<PathBuf> {
-        // TODO encode .meta in type system?
-        path_from_key(&self.path, key, ".meta")
-    }
-
-    async fn get_cachemeta(&'static self, key: &CompactCacheKey) -> Result<Option<CacheMeta>> {
-        let path = self.meta_path(key)?;
-        match File::open(path).await {
-            Ok(mut fp) => {
-                let mut data = Vec::new();
-                match fp.read_to_end(&mut data).await {
-                    Ok(_) => Ok(Some(deserialize_cachemeta(&data)?)),
-                    Err(err) => e_perror("error reading cachemeta", err),
-                }
-            }
-            Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-            Err(err) => e_perror("error opening cachemeta", err),
-        }
-    }
-
-    async fn put_cachemeta(&'static self, key: &CompactCacheKey, meta: &CacheMeta) -> Result<()> {
-        let data = serialize_cachemeta(meta)?;
-        let path = self.meta_path(key)?;
-        ensure_parent_dirs_exist(&path).await?;
-        let mut fp = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .read(false)
-            .write(true)
-            .open(path)
-            .await
-            .map_err(|err| perror("error opening file", err))?;
-        fp.write_all(&data)
-            .await
-            .map_err(|err| perror("error writing to file", err))?;
-        Ok(())
-    }
-
-    fn pop_cachemeta_sync(&'static self, key: &CompactCacheKey) -> Result<()> {
-        let path = self.meta_path(key)?;
-        std::fs::remove_file(path).map_err(|err| perror("pop cachemeta", err))?;
-        Ok(())
+    fn cache_path_compact(&self, key: &CompactCacheKey) -> Result<CachePath> {
+        CachePath::new(&self.path, key)
     }
 
     pub fn purge_sync(&'static self, key: &CompactCacheKey) -> Result<bool> {
-        let data_path = self.final_data_path(key)?;
-        let err_meta = self.pop_cachemeta_sync(key);
-        let err_data = std::fs::remove_file(&data_path);
+        let cache_path = self.cache_path_compact(key)?;
+        let final_data_path = cache_path.final_data();
+        let meta_path = cache_path.meta();
+        // TODO check if partial data exists and is fresh, return error if it does
+        let partial_data_path = cache_path.partial_data();
+        log::info!("purge {}", final_data_path.to_string_lossy());
+        let err_meta = std::fs::remove_file(&meta_path);
+        let err_data = std::fs::remove_file(&final_data_path);
         match (err_meta, err_data) {
             (Ok(()), Ok(())) => Ok(true),
             (Err(e1), Ok(())) => e_perror("Failed to remove cachemeta {}", e1),
             (Ok(()), Err(e2)) => e_perror(
-                format!("Failed to remove data file {}", data_path.display()),
+                format!("Failed to remove data file {}", final_data_path.display()),
                 e2,
             ),
             (Err(err_meta), Err(err_data)) => e_perror(
                 format!(
                     "Failed to remove cachemeta {} and data: {}",
                     err_meta,
-                    data_path.display(),
+                    final_data_path.display(),
                 ),
                 err_data,
             ),
@@ -240,12 +251,12 @@ impl Storage for FileStorage {
         key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<Option<(CacheMeta, HitHandler)>> {
-        let key = key.to_compact();
-        match self.get_cachemeta(&key).await {
+        let cp = self.cache_path(key)?;
+        let meta_path = cp.meta();
+        match get_cachemeta(&meta_path).await {
             Ok(Some(meta)) => {
-                let meta_path = self.meta_path(&key)?;
-                let final_path = self.final_data_path(&key)?;
-                let partial_path = self.partial_data_path(&key)?;
+                let final_path = cp.final_data();
+                let partial_path = cp.partial_data();
                 if final_path.exists() && has_correct_size(&meta, &final_path).await? {
                     let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
                     Ok(Some((meta, h)))
@@ -287,14 +298,14 @@ impl Storage for FileStorage {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<MissHandler> {
-        let key = key.to_compact();
-        self.put_cachemeta(&key, meta).await?;
-        let partial_path = self.partial_data_path(&key)?;
-        let final_path = self.final_data_path(&key)?;
-        let meta_path = self.meta_path(&key)?;
+        let cp = self.cache_path(key)?;
+        let meta_path = cp.meta();
+        let final_path = cp.final_data();
+        let partial_path = cp.partial_data();
         ensure_parent_dirs_exist(&partial_path).await?;
         ensure_parent_dirs_exist(&final_path).await?;
         ensure_parent_dirs_exist(&meta_path).await?;
+        put_cachemeta(meta, &meta_path).await?;
         match fs::remove_file(&final_path).await {
             Ok(()) => log::warn!(
                 "removed existing final data file {}",
@@ -325,7 +336,8 @@ impl Storage for FileStorage {
         meta: &CacheMeta,
         _trace: &SpanHandle,
     ) -> Result<bool> {
-        self.put_cachemeta(&key.to_compact(), meta).await?;
+        let cp = self.cache_path(key)?;
+        put_cachemeta(meta, &cp.meta()).await?;
         Ok(true)
     }
 

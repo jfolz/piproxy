@@ -25,6 +25,7 @@ pub struct PartialFileHitHandler {
 
 impl PartialFileHitHandler {
     pub async fn new(partial_path: PathBuf, final_path: PathBuf, read_size: usize) -> Result<Self> {
+        log::info!("new partial hit handler {}", partial_path.to_string_lossy());
         let mut is_final = false;
         let fp = match File::open(&partial_path).await {
             Ok(fp) => fp,
@@ -116,6 +117,10 @@ impl HandleHit for PartialFileHitHandler {
         _key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<()> {
+        log::info!(
+            "finish partial hit handler {}",
+            self.final_path.to_string_lossy()
+        );
         Ok(())
     }
 

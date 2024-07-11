@@ -14,16 +14,22 @@ use tokio::{
 use super::super::error::{e_perror, perror};
 
 pub struct FileHitHandler {
+    final_path: PathBuf,
     fp: File,
     read_size: usize,
 }
 
 impl FileHitHandler {
     pub async fn new(final_path: PathBuf, read_size: usize) -> Result<FileHitHandler> {
+        log::info!("new hit handler {}", final_path.to_string_lossy());
         let fp = File::open(&final_path)
             .await
             .map_err(|err| perror("error opening data file", err))?;
-        Ok(Self { fp, read_size })
+        Ok(Self {
+            final_path,
+            fp,
+            read_size,
+        })
     }
 }
 
@@ -50,6 +56,7 @@ impl HandleHit for FileHitHandler {
         _key: &CacheKey,
         _trace: &SpanHandle,
     ) -> Result<()> {
+        log::info!("finish hit handler {}", self.final_path.to_string_lossy());
         Ok(())
     }
 

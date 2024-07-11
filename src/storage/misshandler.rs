@@ -23,6 +23,7 @@ impl FileMissHandler {
         final_path: PathBuf,
         meta_path: PathBuf,
     ) -> Result<Self> {
+        log::info!("new miss handler {}", partial_path.to_string_lossy());
         let fp = OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -54,6 +55,7 @@ impl HandleMiss for FileMissHandler {
     }
 
     async fn finish(self: Box<Self>) -> Result<usize> {
+        log::info!("finish miss handler {}", self.final_path.to_string_lossy());
         // make sure all data is synced to storage
         self.fp
             .sync_data()
