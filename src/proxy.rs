@@ -12,6 +12,7 @@ use pingora::{
     http::{ResponseHeader, StatusCode},
     prelude::*,
 };
+use prometheus::{core::Collector, PullingGauge};
 use std::{
     any::{Any, TypeId},
     fs::{self, DirEntry},
@@ -40,6 +41,22 @@ const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
+pub fn cached_bytes() -> f64 {
+    EVICTION.get().unwrap().total_size() as f64
+}
+
+pub fn cached_items() -> f64 {
+    EVICTION.get().unwrap().total_items() as f64
+}
+
+pub fn evicted_bytes() -> f64 {
+    EVICTION.get().unwrap().evicted_size() as f64
+}
+
+pub fn evicted_items() -> f64 {
+    EVICTION.get().unwrap().evicted_items() as f64
+}
+
 #[allow(clippy::cast_sign_loss)]
 #[allow(clippy::cast_precision_loss)]
 #[allow(clippy::cast_possible_truncation)]
@@ -54,6 +71,10 @@ fn calc_max_size(cache_size: usize, cache_ratio: u8) -> io::Result<usize> {
     } else {
         Ok(out as usize)
     }
+}
+
+fn register_metric(c: Box<dyn Collector>) -> io::Result<()> {
+    prometheus::register(c).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 
 pub fn setup(
@@ -81,6 +102,36 @@ pub fn setup(
     let timeout = Duration::from_secs(cache_timeout);
     let cache_lock = CacheLock::new(timeout);
     assert!(CACHE_LOCK.set(cache_lock).is_ok(), "cache lock already set");
+
+    // TODO fix metrics so they actually reflect the state of the cache
+    let metric_cached_items = PullingGauge::new(
+        "piproxy_cached_items",
+        "The available parallelism, usually the numbers of logical cores.",
+        Box::new(cached_items)
+    ).unwrap();
+    register_metric(Box::new(metric_cached_items))?;
+
+    let metric_cached_size = PullingGauge::new(
+        "piproxy_cached_bytes",
+        "The available parallelism, usually the numbers of logical cores.",
+        Box::new(cached_bytes)
+    ).unwrap();
+    register_metric(Box::new(metric_cached_size))?;
+
+    let metric_evicted_items = PullingGauge::new(
+        "piproxy_evicted_items",
+        "The available parallelism, usually the numbers of logical cores.",
+        Box::new(evicted_items)
+    ).unwrap();
+    register_metric(Box::new(metric_evicted_items))?;
+
+    let metric_evicted_size = PullingGauge::new(
+        "piproxy_evicted_bytes",
+        "The available parallelism, usually the numbers of logical cores.",
+        Box::new(evicted_bytes)
+    ).unwrap();
+    register_metric(Box::new(metric_evicted_size))?;
+
     Ok(())
 }
 
