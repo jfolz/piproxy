@@ -73,7 +73,9 @@ fn calc_max_size(cache_size: usize, cache_ratio: u8) -> io::Result<usize> {
     }
 }
 
-fn register_metric(name: &str, help: &str, f: &'static (dyn Fn() -> f64 + Sync + Send)) -> io::Result<()> {
+fn register_metric<F>(name: &str, help: &str, f: F) -> io::Result<()>
+where
+    F: Fn() -> f64 + Sync + Send + 'static {
     let metric = PullingGauge::new(name, help, Box::new(f)).unwrap();
     prometheus::register(Box::new(metric)).map_err(move |e| io::Error::new(io::ErrorKind::Other, e))
 }
@@ -106,23 +108,28 @@ pub fn setup(
 
     register_metric(
         "piproxy_cached_items",
-        "The available parallelism, usually the numbers of logical cores.",
-        &cached_items,
+        "Number of items in the cache.",
+        cached_items,
     )?;
     register_metric(
         "piproxy_cached_bytes",
-        "The available parallelism, usually the numbers of logical cores.",
-        &cached_bytes,
+        "Total size of cached items in bytes.",
+        cached_bytes,
+    )?;
+    register_metric(
+        "piproxy_cached_bytes_limit",
+        "Limit for total size of cached items in bytes.",
+        move || read_size as f64,
     )?;
     register_metric(
         "piproxy_evicted_items",
-        "The available parallelism, usually the numbers of logical cores.",
-        &evicted_items,
+        "Number of items evicted from the cache.",
+        evicted_items,
     )?;
     register_metric(
         "piproxy_evicted_bytes",
-        "The available parallelism, usually the numbers of logical cores.",
-        &evicted_bytes,
+        "Total size of evicted items in bytes.",
+        evicted_bytes,
     )?;
 
     Ok(())
