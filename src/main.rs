@@ -6,6 +6,7 @@ mod defaults;
 mod error;
 mod flags;
 mod logger;
+mod metrics;
 mod proxy;
 mod storage;
 
@@ -40,6 +41,7 @@ fn main() -> io::Result<()> {
     let mut pypi = http_proxy_service(&server.configuration, inner);
     pypi.add_tcp(&conf.address);
 
+    metrics::unlazy();
     let mut prometheus_service_http = Service::prometheus_http_service();
     prometheus_service_http.add_tcp(&conf.prometheus_address);
     server.add_service(prometheus_service_http);
