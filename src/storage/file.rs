@@ -15,7 +15,7 @@ use std::{
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::metrics::{METRIC_CACHE_LOOKUP_ERRORS, METRIC_CACHE_META_UPDATES, METRIC_WARN_MISSING_DATA_FILE, METRIC_WARN_STALE_PARTIAL_EXISTS};
+use crate::metrics::{METRIC_CACHE_HITS_FULL, METRIC_CACHE_LOOKUP_ERRORS, METRIC_CACHE_META_UPDATES, METRIC_WARN_MISSING_DATA_FILE, METRIC_WARN_STALE_PARTIAL_EXISTS};
 
 use super::hithandler::FileHitHandler;
 use super::misshandler::FileMissHandler;
@@ -183,6 +183,7 @@ impl FileStorage {
                 let partial_path = cp.partial_data();
                 if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
                     let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                    METRIC_CACHE_HITS_FULL.inc();
                     Ok(Some((meta, h)))
                 } else if exists(&partial_path).await? {
                     // only return partial hit if partial file has been written to recently
@@ -211,6 +212,7 @@ impl FileStorage {
                     // check again if final file now exists
                     if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
                         let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                        METRIC_CACHE_HITS_FULL.inc();
                         Ok(Some((meta, h)))
                     } else {
                         METRIC_WARN_MISSING_DATA_FILE.inc();
