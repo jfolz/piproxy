@@ -25,7 +25,11 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{error::perror, storage::FileStorage};
+use crate::{
+    error::perror,
+    metrics::{METRIC_REQUEST_COUNT, METRIC_REQUEST_ERROR_COUNT},
+    storage::FileStorage,
+};
 
 static STORAGE: OnceCell<FileStorage> = OnceCell::new();
 static EVICTION: OnceCell<Manager> = OnceCell::new();
@@ -249,6 +253,7 @@ impl ProxyHttp for PyPI<'_> {
     where
         Self::CTX: Send + Sync,
     {
+        METRIC_REQUEST_COUNT.inc();
         // redirect /index to /simple
         let req = session.req_header_mut();
         if req.uri.path().starts_with("/index") {
@@ -410,6 +415,13 @@ impl ProxyHttp for PyPI<'_> {
         } else {
             Ok(RespCacheable::Uncacheable(NoCacheReason::OriginNotCache))
         }
+    }
+
+    async fn logging(&self, _session: &mut Session, _e: Option<&Error>, _ctx: &mut Self::CTX)
+    where
+        Self::CTX: Send + Sync,
+    {
+        METRIC_REQUEST_ERROR_COUNT.inc();
     }
 }
 

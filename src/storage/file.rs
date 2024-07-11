@@ -15,7 +15,10 @@ use std::{
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::metrics::{METRIC_CACHE_HITS_FULL, METRIC_CACHE_LOOKUP_ERRORS, METRIC_CACHE_META_UPDATES, METRIC_WARN_MISSING_DATA_FILE, METRIC_WARN_STALE_PARTIAL_EXISTS};
+use crate::metrics::{
+    METRIC_CACHE_HITS_FULL, METRIC_CACHE_LOOKUP_ERRORS, METRIC_CACHE_META_UPDATES,
+    METRIC_WARN_MISSING_DATA_FILE, METRIC_WARN_STALE_PARTIAL_EXISTS,
+};
 
 use super::hithandler::FileHitHandler;
 use super::misshandler::FileMissHandler;
@@ -190,12 +193,16 @@ impl FileStorage {
                     match recently_updated(&partial_path).await {
                         Ok(true) => {
                             let h = Box::new(
-                                PartialFileHitHandler::new(partial_path, final_path, self.read_size)
-                                    .await?,
+                                PartialFileHitHandler::new(
+                                    partial_path,
+                                    final_path,
+                                    self.read_size,
+                                )
+                                .await?,
                             );
                             METRIC_CACHE_HITS_PARTIAL.inc();
-                            return Ok(Some((meta, h)))
-                        },
+                            return Ok(Some((meta, h)));
+                        }
                         Ok(false) => {
                             METRIC_WARN_STALE_PARTIAL_EXISTS.inc();
                             log::warn!(
