@@ -32,11 +32,11 @@ pub static METRIC_CACHE_META_UPDATES: Lazy<IntCounter> = Lazy::new(||
 );
 
 pub static METRIC_WARN_STALE_PARTIAL_EXISTS: Lazy<IntCounter> = Lazy::new(||
-    register_int_counter!("piproxy_warn_stale_partial_count", "Count of stale partial files").unwrap()
+    register_int_counter!("piproxy_warn_stale_partial_count", "Number of warnings for existing stale partial files").unwrap()
 );
 
 pub static METRIC_WARN_MISSING_DATA_FILE: Lazy<IntCounter> = Lazy::new(||
-    register_int_counter!("piproxy_warn_missing_data_file_count", "Number of cache meta updates").unwrap()
+    register_int_counter!("piproxy_warn_missing_data_file_count", "Number of warnings for missing data files").unwrap()
 );
 
 pub fn unlazy() {
