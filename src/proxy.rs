@@ -18,14 +18,14 @@ use std::{
     io::{self, ErrorKind},
     os::unix::fs::MetadataExt,
     path::Path,
-    str,
+    str::{self, FromStr},
 };
 use std::{
     path::PathBuf,
     time::{Duration, SystemTime},
 };
 
-use crate::storage::FileStorage;
+use crate::{error::perror, storage::FileStorage};
 
 static STORAGE: OnceCell<FileStorage> = OnceCell::new();
 static EVICTION: OnceCell<Manager> = OnceCell::new();
@@ -205,8 +205,8 @@ impl<'a> PyPI<'a> {
     }
 }
 
-fn request_path(session: &Session) -> &[u8] {
-    session.req_header().raw_path()
+fn request_path(session: &Session) -> &str {
+    session.req_header().uri.path()
 }
 
 pub struct CacheCTX {
@@ -245,12 +245,32 @@ impl ProxyHttp for PyPI<'_> {
         Self::CTX::new()
     }
 
+    async fn request_filter(&self, session: &mut Session, _ctx: &mut Self::CTX) -> Result<bool>
+    where
+        Self::CTX: Send + Sync,
+    {
+        // redirect /index to /simple
+        let req = session.req_header_mut();
+        if req.uri.path().starts_with("/index") {
+            let mut parts = req.uri.clone().into_parts();
+            if let Some(pq) = parts.path_and_query {
+                let pq = pq.as_str().replacen("/index", "/simple", 1);
+                let pq = http::uri::PathAndQuery::from_str(&pq)
+                    .map_err(|e| perror("cannot parse URI path", e))?;
+                parts.path_and_query = Some(pq);
+                let new_uri = http::Uri::from_parts(parts).unwrap();
+                req.set_uri(new_uri);
+            }
+        }
+        Ok(false)
+    }
+
     async fn upstream_peer(
         &self,
         session: &mut Session,
         _ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        let addr = if request_path(session).starts_with(b"/packages/") {
+        let addr = if request_path(session).starts_with("/packages/") {
             // for pacakges use files.pythonhosted.org
             (FILES_PYTHONHOSTED_ORG, 443)
         } else {
@@ -263,12 +283,11 @@ impl ProxyHttp for PyPI<'_> {
 
     async fn upstream_request_filter(
         &self,
-        session: &mut Session,
+        _session: &mut Session,
         upstream_request: &mut RequestHeader,
         _ctx: &mut Self::CTX,
     ) -> Result<()> {
-        // for packages use files.pythonhosted.org
-        if request_path(session).starts_with(b"/packages/") {
+        if upstream_request.uri.path().starts_with("/packages/") {
             upstream_request.insert_header("Host", FILES_PYTHONHOSTED_ORG)?;
         }
         // otherwise pypi.org

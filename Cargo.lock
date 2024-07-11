@@ -1621,6 +1621,7 @@ dependencies = [
  "bytes",
  "clap 4.5.8",
  "const-hex",
+ "http 1.1.0",
  "log",
  "once_cell",
  "parse-size",

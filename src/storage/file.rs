@@ -170,7 +170,10 @@ impl FileStorage {
 
         // error if partial data path exists
         let partial_data_path = cache_path.partial_data();
-        if partial_data_path.try_exists().map_err(|e| perror("cannot check if partial file exists", e))? {
+        if partial_data_path
+            .try_exists()
+            .map_err(|e| perror("cannot check if partial file exists", e))?
+        {
             return Err(pingora::Error::explain(
                 pingora::ErrorType::InternalError,
                 format!(
@@ -263,7 +266,9 @@ async fn touch(path: &Path) -> Result<()> {
 }
 
 async fn exists(path: &Path) -> Result<bool> {
-    fs::try_exists(path).await.map_err(|e| perror("could not check if file exists", e))
+    fs::try_exists(path)
+        .await
+        .map_err(|e| perror("could not check if file exists", e))
 }
 
 #[async_trait]
