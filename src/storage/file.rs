@@ -97,7 +97,7 @@ async fn get_cachemeta(path: &Path) -> Result<Option<CacheMeta>> {
 
 async fn put_cachemeta(meta: &CacheMeta, path: &Path) -> Result<()> {
     let data = serialize_cachemeta(meta)?;
-    ensure_parent_dirs_exist(&path).await?;
+    ensure_parent_dirs_exist(path).await?;
     let mut fp = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -186,7 +186,7 @@ impl FileStorage {
         let final_data_path = cache_path.final_data();
         let meta_path = cache_path.meta();
         log::info!("purge {}", final_data_path.to_string_lossy());
-        let err_meta = std::fs::remove_file(&meta_path);
+        let err_meta = std::fs::remove_file(meta_path);
         let err_data = std::fs::remove_file(&final_data_path);
         match (err_meta, err_data) {
             (Ok(()), Ok(())) => Ok(true),
@@ -259,7 +259,7 @@ async fn recently_updated(path: &Path) -> io::Result<bool> {
 }
 
 async fn touch(path: &Path) -> Result<()> {
-    match OpenOptions::new().create(true).write(true).open(path).await {
+    match OpenOptions::new().create(true).truncate(true).write(true).open(path).await {
         Ok(_) => Ok(()),
         Err(e) => e_perror("cannot touch file", e),
     }
