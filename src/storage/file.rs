@@ -170,6 +170,63 @@ impl FileStorage {
         CachePath::new(&self.path, key)
     }
 
+    async fn lookup_inner(
+        &'static self,
+        key: &CacheKey,
+        _trace: &SpanHandle,
+    ) -> Result<Option<(CacheMeta, HitHandler)>> {
+        let cp = self.cache_path(key)?;
+        let meta_path = cp.meta();
+        match get_cachemeta(&meta_path).await {
+            Ok(Some(meta)) => {
+                let final_path = cp.final_data();
+                let partial_path = cp.partial_data();
+                if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
+                    let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                    Ok(Some((meta, h)))
+                } else if exists(&partial_path).await? {
+                    // only return partial hit if partial file has been written to recently
+                    match recently_updated(&partial_path).await {
+                        Ok(true) => {
+                            let h = Box::new(
+                                PartialFileHitHandler::new(partial_path, final_path, self.read_size)
+                                    .await?,
+                            );
+                            METRIC_CACHE_HITS_PARTIAL.inc();
+                            return Ok(Some((meta, h)))
+                        },
+                        Ok(false) => {
+                            METRIC_WARN_STALE_PARTIAL_EXISTS.inc();
+                            log::warn!(
+                                "partial data file {} exists, but has not been written to recently",
+                                partial_path.to_string_lossy()
+                            );
+                            return Ok(None);
+                        }
+                        Err(err) => {
+                            return e_perror("cannot determine modified time of partial file", err)
+                        }
+                    };
+                } else {
+                    // check again if final file now exists
+                    if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
+                        let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                        Ok(Some((meta, h)))
+                    } else {
+                        METRIC_WARN_MISSING_DATA_FILE.inc();
+                        log::warn!(
+                            "cachemeta {} exists, but no corresponding data file found",
+                            meta_path.to_string_lossy()
+                        );
+                        Ok(None)
+                    }
+                }
+            }
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
     pub fn purge_sync(&'static self, key: &CompactCacheKey) -> Result<bool> {
         METRIC_CACHE_PURGES.inc();
         let cache_path = self.cache_path_compact(key)?;
@@ -288,69 +345,21 @@ impl Storage for FileStorage {
     async fn lookup(
         &'static self,
         key: &CacheKey,
-        _trace: &SpanHandle,
+        trace: &SpanHandle,
     ) -> Result<Option<(CacheMeta, HitHandler)>> {
-        let cp = self.cache_path(key)?;
-        let meta_path = cp.meta();
-        match get_cachemeta(&meta_path).await {
-            Ok(Some(meta)) => {
-                let final_path = cp.final_data();
-                let partial_path = cp.partial_data();
-                if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
-                    let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
-                    METRIC_CACHE_HITS.inc();
-                    Ok(Some((meta, h)))
-                } else if exists(&partial_path).await? {
-                    // only return partial hit if partial file has been written to recently
-                    match recently_updated(&partial_path).await {
-                        Ok(true) => {
-                            let h = Box::new(
-                                PartialFileHitHandler::new(partial_path, final_path, self.read_size)
-                                    .await?,
-                            );
-                            METRIC_CACHE_HITS_PARTIAL.inc();
-                            return Ok(Some((meta, h)))
-                        },
-                        Ok(false) => {
-                            METRIC_CACHE_MISSES.inc();
-                            METRIC_WARN_STALE_PARTIAL_EXISTS.inc();
-                            log::warn!(
-                                "partial data file {} exists, but has not been written to recently",
-                                partial_path.to_string_lossy()
-                            );
-                            return Ok(None);
-                        }
-                        Err(err) => {
-                            METRIC_CACHE_MISSES.inc();
-                            METRIC_CACHE_LOOKUP_ERRORS.inc();
-                            return e_perror("cannot determine modified time of partial file", err)
-                        }
-                    };
-                } else {
-                    // check again if final file now exists
-                    if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
-                        let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
-                        METRIC_CACHE_HITS.inc();
-                        Ok(Some((meta, h)))
-                    } else {
-                        METRIC_CACHE_MISSES.inc();
-                        METRIC_WARN_MISSING_DATA_FILE.inc();
-                        log::warn!(
-                            "cachemeta {} exists, but no corresponding data file found",
-                            meta_path.to_string_lossy()
-                        );
-                        Ok(None)
-                    }
-                }
+        match self.lookup_inner(key, trace).await {
+            Ok(Some(result)) => {
+                METRIC_CACHE_HITS.inc();
+                Ok(Some(result))
             }
             Ok(None) => {
                 METRIC_CACHE_MISSES.inc();
                 Ok(None)
             }
-            Err(err) => {
+            Err(e) => {
                 METRIC_CACHE_MISSES.inc();
                 METRIC_CACHE_LOOKUP_ERRORS.inc();
-                Err(err)
+                Err(e)
             }
         }
     }
