@@ -417,11 +417,13 @@ impl ProxyHttp for PyPI<'_> {
         }
     }
 
-    async fn logging(&self, _session: &mut Session, _e: Option<&Error>, _ctx: &mut Self::CTX)
+    async fn logging(&self, _session: &mut Session, e: Option<&Error>, _ctx: &mut Self::CTX)
     where
         Self::CTX: Send + Sync,
     {
-        METRIC_REQUEST_ERROR_COUNT.inc();
+        if e.is_some() {
+            METRIC_REQUEST_ERROR_COUNT.inc();
+        }
     }
 }
 
