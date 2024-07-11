@@ -1,111 +1,111 @@
+use std::io;
+
 use once_cell::sync::Lazy;
-use prometheus::{self, IntCounter};
+use prometheus::{self, register_int_gauge, IntCounter, PullingGauge};
 
 use prometheus::register_int_counter;
 
-pub static METRIC_REQUEST_COUNT: Lazy<IntCounter> =
-    Lazy::new(|| register_int_counter!(
-        "piproxy_request_count",
-        "Number of requests"
-    )
-    .unwrap()
-);
+pub fn register_metric(
+    name: &str,
+    help: &str,
+    f: &'static (dyn Fn() -> f64 + Sync + Send),
+) -> io::Result<()> {
+    let metric = PullingGauge::new(name, help, Box::new(f)).unwrap();
+    prometheus::register(Box::new(metric)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+}
 
-pub static METRIC_REQUEST_ERROR_COUNT: Lazy<IntCounter> = Lazy::new(|| 
+pub fn register_constant(name: &str, help: &str, value: i64) -> io::Result<()> {
+    let g = register_int_gauge!(name, help).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    g.set(value);
+    Ok(())
+}
+
+pub static METRIC_REQUEST_COUNT: Lazy<IntCounter> =
+    Lazy::new(|| register_int_counter!("piproxy_request_count", "Number of requests").unwrap());
+
+pub static METRIC_REQUEST_ERROR_COUNT: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_request_error_count",
         "Number of requests with errors"
     )
     .unwrap()
-);
+});
 
-pub static METRIC_UPSTREAM_BYTES: Lazy<IntCounter> = Lazy::new(|| 
+pub static METRIC_UPSTREAM_BYTES: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_upstream_bytes",
         "Number of bytes downloaded from upstream"
     )
     .unwrap()
-);
+});
 
-pub static METRIC_DOWNSTREAM_BYTES: Lazy<IntCounter> = Lazy::new(|| 
+pub static METRIC_DOWNSTREAM_BYTES: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_downstream_bytes",
         "Number of bytes sent to downstream"
     )
     .unwrap()
-);
+});
 
-pub static METRIC_CACHE_HITS: Lazy<IntCounter> = Lazy::new(|| 
+pub static METRIC_CACHE_HITS: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_cache_hit_count",
         "Number of full and partial cache hits"
     )
     .unwrap()
-);
+});
 
-pub static METRIC_CACHE_HITS_FULL: Lazy<IntCounter> = Lazy::new(|| 
-    register_int_counter!(
-        "piproxy_cache_hit_full_count",
-        "Number of full cache hits"
-    )
-    .unwrap()
-);
+pub static METRIC_CACHE_HITS_FULL: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!("piproxy_cache_hit_full_count", "Number of full cache hits").unwrap()
+});
 
-pub static METRIC_CACHE_HITS_PARTIAL: Lazy<IntCounter> = Lazy::new(|| 
+pub static METRIC_CACHE_HITS_PARTIAL: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_cache_hit_partial_count",
         "Number of partial cache hits"
     )
     .unwrap()
-);
+});
 
-pub static METRIC_CACHE_MISSES: Lazy<IntCounter> = Lazy::new(|| 
-    register_int_counter!(
-        "piproxy_cache_miss_count",
-        "Number of cache misses"
-    )
-    .unwrap()
-);
+pub static METRIC_CACHE_MISSES: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!("piproxy_cache_miss_count", "Number of cache misses").unwrap()
+});
 
-pub static METRIC_CACHE_PURGES: Lazy<IntCounter> = Lazy::new(||
-    register_int_counter!(
-        "piproxy_cache_purge_count",
-        "Number of cache purges"
-    )
-    .unwrap()
-);
+pub static METRIC_CACHE_PURGES: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!("piproxy_cache_purge_count", "Number of cache purges").unwrap()
+});
 
-pub static METRIC_CACHE_LOOKUP_ERRORS: Lazy<IntCounter> = Lazy::new(||
+pub static METRIC_CACHE_LOOKUP_ERRORS: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_cache_lookup_error_count",
         "Number of cache lookup errors"
     )
     .unwrap()
-);
+});
 
-pub static METRIC_CACHE_META_UPDATES: Lazy<IntCounter> = Lazy::new(||
+pub static METRIC_CACHE_META_UPDATES: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_cache_meta_update_count",
         "Number of cache meta updates"
     )
     .unwrap()
-);
+});
 
-pub static METRIC_WARN_STALE_PARTIAL_EXISTS: Lazy<IntCounter> = Lazy::new(||
+pub static METRIC_WARN_STALE_PARTIAL_EXISTS: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_warn_stale_partial_count",
         "Number of warnings for existing stale partial files"
     )
     .unwrap()
-);
+});
 
-pub static METRIC_WARN_MISSING_DATA_FILE: Lazy<IntCounter> = Lazy::new(||
+pub static METRIC_WARN_MISSING_DATA_FILE: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "piproxy_warn_missing_data_file_count",
         "Number of warnings for missing data files"
     )
     .unwrap()
-);
+});
 
 pub fn unlazy() {
     METRIC_REQUEST_COUNT.get();

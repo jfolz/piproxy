@@ -12,7 +12,6 @@ use pingora::{
     http::{ResponseHeader, StatusCode},
     prelude::*,
 };
-use prometheus::PullingGauge;
 use std::{
     any::{Any, TypeId},
     fs::{self, DirEntry},
@@ -28,7 +27,9 @@ use std::{
 
 use crate::{
     error::perror,
-    metrics::{METRIC_REQUEST_COUNT, METRIC_REQUEST_ERROR_COUNT},
+    metrics::{
+        register_constant, register_metric, METRIC_REQUEST_COUNT, METRIC_REQUEST_ERROR_COUNT,
+    },
     storage::FileStorage,
 };
 
@@ -73,13 +74,6 @@ fn calc_max_size(cache_size: usize, cache_ratio: u8) -> io::Result<usize> {
     }
 }
 
-fn register_metric<F>(name: &str, help: &str, f: F) -> io::Result<()>
-where
-    F: Fn() -> f64 + Sync + Send + 'static {
-    let metric = PullingGauge::new(name, help, Box::new(f)).unwrap();
-    prometheus::register(Box::new(metric)).map_err(move |e| io::Error::new(io::ErrorKind::Other, e))
-}
-
 pub fn setup(
     cache_path: PathBuf,
     cache_size: usize,
@@ -109,27 +103,27 @@ pub fn setup(
     register_metric(
         "piproxy_cached_items",
         "Number of items in the cache.",
-        cached_items,
+        &cached_items,
     )?;
     register_metric(
         "piproxy_cached_bytes",
         "Total size of cached items in bytes.",
-        cached_bytes,
+        &cached_bytes,
     )?;
-    register_metric(
+    register_constant(
         "piproxy_cached_bytes_limit",
         "Limit for total size of cached items in bytes.",
-        move || cache_size as f64,
+        cache_size as i64,
     )?;
     register_metric(
         "piproxy_evicted_items",
         "Number of items evicted from the cache.",
-        evicted_items,
+        &evicted_items,
     )?;
     register_metric(
         "piproxy_evicted_bytes",
         "Total size of evicted items in bytes.",
-        evicted_bytes,
+        &evicted_bytes,
     )?;
 
     Ok(())
