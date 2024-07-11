@@ -354,6 +354,7 @@ impl ProxyHttp for PyPI<'_> {
         let Some(storage) = STORAGE.get() else {
             return Ok(());
         };
+        // TODO check if enough free space in storage
         session.cache.enable(
             // storage: the cache storage backend that implements storage::Storage
             storage,

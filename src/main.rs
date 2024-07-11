@@ -1,4 +1,5 @@
 use pingora::prelude::*;
+use pingora::services::listening::Service;
 use std::{io, process::exit};
 
 mod defaults;
@@ -33,11 +34,16 @@ fn main() -> io::Result<()> {
     )?;
     proxy::populate_lru(&conf.cache_path)?;
 
-    let mut my_server = Server::new_with_opt_and_conf(conf.opt(), conf.pingora);
-    my_server.bootstrap();
+    let mut server = Server::new_with_opt_and_conf(conf.opt(), conf.pingora);
+    server.bootstrap();
     let inner = proxy::PyPI::new();
-    let mut pypi = http_proxy_service(&my_server.configuration, inner);
+    let mut pypi = http_proxy_service(&server.configuration, inner);
     pypi.add_tcp(&conf.address);
-    my_server.add_service(pypi);
-    my_server.run_forever();
+
+    let mut prometheus_service_http = Service::prometheus_http_service();
+    prometheus_service_http.add_tcp(&conf.prometheus_address);
+    server.add_service(prometheus_service_http);
+
+    server.add_service(pypi);
+    server.run_forever();
 }

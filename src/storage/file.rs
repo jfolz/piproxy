@@ -259,7 +259,13 @@ async fn recently_updated(path: &Path) -> io::Result<bool> {
 }
 
 async fn touch(path: &Path) -> Result<()> {
-    match OpenOptions::new().create(true).truncate(true).write(true).open(path).await {
+    match OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)
+        .await
+    {
         Ok(_) => Ok(()),
         Err(e) => e_perror("cannot touch file", e),
     }

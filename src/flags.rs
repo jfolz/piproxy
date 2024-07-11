@@ -16,7 +16,7 @@ use std::str::FromStr;
 
 use crate::defaults::{
     DEFAULT_ADDRESS, DEFAULT_CACHE_PATH, DEFAULT_CACHE_RATIO, DEFAULT_CACHE_SIZE,
-    DEFAULT_CACHE_TIMEOUT, DEFAULT_LOG_LEVEL, DEFAULT_READ_SIZE,
+    DEFAULT_CACHE_TIMEOUT, DEFAULT_LOG_LEVEL, DEFAULT_PROMETHEUS_ADDRESS, DEFAULT_READ_SIZE,
 };
 
 #[derive(Debug, Clone)]
@@ -117,6 +117,9 @@ pub struct Args {
 fn default_address() -> String {
     DEFAULT_ADDRESS.to_owned()
 }
+fn default_prometheus_address() -> String {
+    DEFAULT_PROMETHEUS_ADDRESS.to_owned()
+}
 fn default_log_level() -> LevelFilter {
     DEFAULT_LOG_LEVEL
 }
@@ -158,6 +161,8 @@ pub struct Config {
     pub log_level: LevelFilter,
     #[serde(default = "default_address")]
     pub address: String,
+    #[serde(default = "default_prometheus_address")]
+    pub prometheus_address: String,
     #[serde(default = "default_cache_path")]
     pub cache_path: PathBuf,
     #[serde(default = "default_cache_size", deserialize_with = "deserialize_unit")]
@@ -181,6 +186,7 @@ impl Default for Config {
             journal: false,
             log_level: DEFAULT_LOG_LEVEL,
             address: DEFAULT_ADDRESS.to_owned(),
+            prometheus_address: DEFAULT_PROMETHEUS_ADDRESS.to_owned(),
             cache_path: DEFAULT_CACHE_PATH.into(),
             cache_size: DEFAULT_CACHE_SIZE,
             cache_ratio: DEFAULT_CACHE_RATIO,
