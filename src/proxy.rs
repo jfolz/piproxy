@@ -119,7 +119,7 @@ pub fn setup(
     register_metric(
         "piproxy_cached_bytes_limit",
         "Limit for total size of cached items in bytes.",
-        move || read_size as f64,
+        move || cache_size as f64,
     )?;
     register_metric(
         "piproxy_evicted_items",
