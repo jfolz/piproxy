@@ -143,7 +143,7 @@ fn deserialize_cachemeta(data: &[u8]) -> Result<CacheMeta> {
 
 impl FileStorage {
     pub fn new(path: PathBuf, max_size: usize, read_size: usize) -> io::Result<Self> {
-        if !path.exists() {
+        if !path.try_exists()? {
             std::fs::create_dir_all(&path)?;
         }
         Ok(Self {
@@ -170,7 +170,7 @@ impl FileStorage {
 
         // error if partial data path exists
         let partial_data_path = cache_path.partial_data();
-        if partial_data_path.exists() {
+        if partial_data_path.try_exists().map_err(|e| perror("cannot check if partial file exists", e))? {
             return Err(pingora::Error::explain(
                 pingora::ErrorType::InternalError,
                 format!(
@@ -206,7 +206,7 @@ impl FileStorage {
 
 async fn ensure_parent_dirs_exist(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        if !parent.exists() {
+        if !exists(parent).await? {
             if let Err(err) = fs::create_dir_all(parent).await {
                 return e_perror("error creating cache dir", err);
             }
@@ -255,6 +255,17 @@ async fn recently_updated(path: &Path) -> io::Result<bool> {
     Ok(SystemTime::now() < modified + Duration::from_secs(30))
 }
 
+async fn touch(path: &Path) -> Result<()> {
+    match OpenOptions::new().create(true).write(true).open(path).await {
+        Ok(_) => Ok(()),
+        Err(e) => e_perror("cannot touch file", e),
+    }
+}
+
+async fn exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path).await.map_err(|e| perror("could not check if file exists", e))
+}
+
 #[async_trait]
 impl Storage for FileStorage {
     async fn lookup(
@@ -268,10 +279,10 @@ impl Storage for FileStorage {
             Ok(Some(meta)) => {
                 let final_path = cp.final_data();
                 let partial_path = cp.partial_data();
-                if final_path.exists() && has_correct_size(&meta, &final_path).await? {
+                if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
                     let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
                     Ok(Some((meta, h)))
-                } else if partial_path.exists() {
+                } else if exists(&partial_path).await? {
                     // only return partial hit if partial file has been written to recently
                     let h = match recently_updated(&partial_path).await {
                         Ok(true) => Box::new(
@@ -291,11 +302,17 @@ impl Storage for FileStorage {
                     };
                     Ok(Some((meta, h)))
                 } else {
-                    log::warn!(
-                        "cachemeta {} exists, but no corresponding data file found",
-                        meta_path.to_string_lossy()
-                    );
-                    Ok(None)
+                    // check again if final file now exists
+                    if exists(&final_path).await? && has_correct_size(&meta, &final_path).await? {
+                        let h = Box::new(FileHitHandler::new(final_path, self.read_size).await?);
+                        Ok(Some((meta, h)))
+                    } else {
+                        log::warn!(
+                            "cachemeta {} exists, but no corresponding data file found",
+                            meta_path.to_string_lossy()
+                        );
+                        Ok(None)
+                    }
                 }
             }
             Ok(None) => Ok(None),
@@ -316,6 +333,8 @@ impl Storage for FileStorage {
         ensure_parent_dirs_exist(&partial_path).await?;
         ensure_parent_dirs_exist(&final_path).await?;
         ensure_parent_dirs_exist(&meta_path).await?;
+        // touch partial file before putting cachemeta to avoid missing partial file warning
+        touch(&partial_path).await?;
         put_cachemeta(meta, &meta_path).await?;
         match fs::remove_file(&final_path).await {
             Ok(()) => log::warn!(
