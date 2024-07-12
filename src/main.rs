@@ -42,7 +42,7 @@ fn main() -> io::Result<()> {
         "version",
         env!("CARGO_PKG_VERSION"),
     )?;
-    metrics::unlazy();
+    metrics::init()?;
 
     let mut server = Server::new_with_opt_and_conf(conf.opt(), conf.pingora);
     server.bootstrap();
