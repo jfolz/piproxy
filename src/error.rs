@@ -1,5 +1,6 @@
 use pingora::{prelude::*, ErrorTrait, ImmutStr};
 
+#[allow(clippy::unnecessary_box_returns)]
 pub fn perror<S: Into<ImmutStr>, E: Into<Box<dyn ErrorTrait + Send + Sync>>>(
     context: S,
     cause: E,

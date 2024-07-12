@@ -30,6 +30,7 @@ use super::{
     partialhithandler::PartialFileHitHandler,
 };
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct FileStorage {
     path: PathBuf,

@@ -42,18 +42,22 @@ const FILES_PYTHONHOSTED_ORG: &str = "files.pythonhosted.org";
 const HTTPS_FILES_PYTHONHOSTED_ORG: &str = "https://files.pythonhosted.org";
 const CONTENT_TYPE_TEXT_HTML: &str = "text/html";
 
+#[allow(clippy::cast_precision_loss)]
 pub fn cached_bytes() -> f64 {
     EVICTION.get().unwrap().total_size() as f64
 }
 
+#[allow(clippy::cast_precision_loss)]
 pub fn cached_items() -> f64 {
     EVICTION.get().unwrap().total_items() as f64
 }
 
+#[allow(clippy::cast_precision_loss)]
 pub fn evicted_bytes() -> f64 {
     EVICTION.get().unwrap().evicted_size() as f64
 }
 
+#[allow(clippy::cast_precision_loss)]
 pub fn evicted_items() -> f64 {
     EVICTION.get().unwrap().evicted_items() as f64
 }

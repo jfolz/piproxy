@@ -3,10 +3,10 @@ use std::io;
 
 use once_cell::sync::Lazy;
 use prometheus::{
-    self, proto, labels, opts, register, register_int_counter, register_int_gauge, Counter, Gauge,
-    IntCounter, IntGauge, PullingGauge,
+    self,
     core::{Collector, Desc},
-    Opts,
+    labels, opts, proto, register, register_int_counter, register_int_gauge, Counter, Gauge,
+    IntCounter, IntGauge, Opts, PullingGauge,
 };
 
 pub fn register_metric(
@@ -355,10 +355,10 @@ LICENSE:
    See the License for the specific language governing permissions and
    limitations under the License.
 */
-/// A modified ProcessCollector from prometheus crate.
+/// A modified `ProcessCollector` from prometheus crate.
 /// Modificaitons:
 /// - Always collects process metrics for self, rather than some PID
-/// - process_cpu_seconds_total and process_start_time_seconds are f64
+/// - `process_cpu_seconds_total` and `process_start_time_seconds` are f64
 #[derive(Debug)]
 pub struct ProcessCollector {
     descs: Vec<Desc>,
@@ -372,8 +372,9 @@ pub struct ProcessCollector {
 }
 
 const METRICS_NUMBER: usize = 7;
+#[allow(clippy::cast_precision_loss)]
 static CLK_TCK: Lazy<f64> = Lazy::new(|| unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64);
-static PAGESIZE: Lazy<i64> = Lazy::new(|| unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.into());
+static PAGESIZE: Lazy<i64> = Lazy::new(|| unsafe { libc::sysconf(libc::_SC_PAGESIZE) });
 
 impl ProcessCollector {
     pub fn new<S: Into<String>>(namespace: S) -> ProcessCollector {
@@ -439,6 +440,7 @@ impl ProcessCollector {
         .unwrap();
 
         // proc_start_time init once because it is immutable
+        #[allow(clippy::cast_precision_loss)]
         if let Ok(boot_time) = procfs::boot_time_secs() {
             if let Ok(stat) = procfs::process::Process::myself().and_then(|p| p.stat()) {
                 start_time.set(stat.starttime as f64 / *CLK_TCK + boot_time as f64);
@@ -466,36 +468,41 @@ impl ProcessCollector {
     }
 }
 
+fn safe_u64_as_i64(v: u64) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+fn safe_usize_as_i64(v: usize) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+
 impl Collector for ProcessCollector {
     fn desc(&self) -> Vec<&Desc> {
         self.descs.iter().collect()
     }
 
     fn collect(&self) -> Vec<proto::MetricFamily> {
-        let p = match procfs::process::Process::myself() {
-            Ok(p) => p,
-            Err(..) => {
-                return Vec::new();
-            }
+        let Ok(p) = procfs::process::Process::myself() else {
+            return Vec::new();
         };
 
         // file descriptors
         if let Ok(fd_count) = p.fd_count() {
-            self.open_fds.set(fd_count as i64);
+            self.open_fds.set(safe_usize_as_i64(fd_count));
         }
         if let Ok(limits) = p.limits() {
             if let procfs::process::LimitValue::Value(max) = limits.max_open_files.soft_limit {
-                self.max_fds.set(max as i64)
+                self.max_fds.set(safe_u64_as_i64(max));
             }
         }
 
         let mut cpu_total_mfs = None;
         if let Ok(stat) = p.stat() {
             // memory
-            self.vsize.set(stat.vsize as i64);
-            self.rss.set((stat.rss as i64) * *PAGESIZE);
+            self.vsize.set(safe_u64_as_i64(stat.vsize));
+            self.rss.set(safe_u64_as_i64(stat.rss) * *PAGESIZE);
 
             // cpu
+            #[allow(clippy::cast_precision_loss)]
             let total = (stat.utime + stat.stime) as f64 / *CLK_TCK;
             let past = self.cpu_total.get();
             let inc = total - past;
