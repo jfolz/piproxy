@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::io;
 
 use once_cell::sync::Lazy;
@@ -14,9 +15,17 @@ pub fn register_metric(
     prometheus::register(Box::new(metric)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 
-pub fn register_constant(name: &str, help: &str, value: i64) -> io::Result<()> {
+pub fn register_constant<T>(name: &str, help: &str, value: T) -> io::Result<()>
+where
+    T: TryInto<i64> + Display + Copy,
+{
     let g = register_int_gauge!(name, help).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    g.set(value);
+    g.set(value.try_into().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{value} does not fit into i64"),
+        )
+    })?);
     Ok(())
 }
 

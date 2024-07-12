@@ -100,30 +100,40 @@ pub fn setup(
     let cache_lock = CacheLock::new(timeout);
     assert!(CACHE_LOCK.set(cache_lock).is_ok(), "cache lock already set");
 
-    register_metric(
-        "piproxy_cached_items",
-        "Number of items in the cache.",
-        &cached_items,
+    register_constant(
+        "piproxy_cache_size_bytes",
+        "Limit for total size of cached items in bytes.",
+        cache_size,
+    )?;
+    register_constant(
+        "piproxy_cache_max_item_size_bytes",
+        "Largest chacheable size of an item in bytes.",
+        max_size,
+    )?;
+    register_constant(
+        "piproxy_cache_ratio_percent",
+        "Largest chacheable size of an item in percent of cache size.",
+        cache_ratio,
     )?;
     register_metric(
         "piproxy_cached_bytes",
         "Total size of cached items in bytes.",
         &cached_bytes,
     )?;
-    register_constant(
-        "piproxy_cached_bytes_limit",
-        "Limit for total size of cached items in bytes.",
-        cache_size as i64,
-    )?;
     register_metric(
-        "piproxy_evicted_items",
-        "Number of items evicted from the cache.",
-        &evicted_items,
+        "piproxy_cached_items",
+        "Number of items in the cache.",
+        &cached_items,
     )?;
     register_metric(
         "piproxy_evicted_bytes",
         "Total size of evicted items in bytes.",
         &evicted_bytes,
+    )?;
+    register_metric(
+        "piproxy_evicted_items",
+        "Number of items evicted from the cache.",
+        &evicted_items,
     )?;
 
     Ok(())
