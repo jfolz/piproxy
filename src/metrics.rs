@@ -2,9 +2,10 @@ use std::fmt::Display;
 use std::io;
 
 use once_cell::sync::Lazy;
-use prometheus::{self, register_int_gauge, IntCounter, PullingGauge};
-
-use prometheus::register_int_counter;
+use prometheus::{
+    self, labels, opts, register, register_int_counter, register_int_gauge, IntCounter, IntGauge,
+    PullingGauge,
+};
 
 pub fn register_metric(
     name: &str,
@@ -12,7 +13,7 @@ pub fn register_metric(
     f: &'static (dyn Fn() -> f64 + Sync + Send),
 ) -> io::Result<()> {
     let metric = PullingGauge::new(name, help, Box::new(f)).unwrap();
-    prometheus::register(Box::new(metric)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    register(Box::new(metric)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 
 pub fn register_constant<T>(name: &str, help: &str, value: T) -> io::Result<()>
@@ -26,6 +27,14 @@ where
             format!("{value} does not fit into i64"),
         )
     })?);
+    Ok(())
+}
+
+pub fn register_label(name: &str, help: &str, label: &str, value: &str) -> io::Result<()> {
+    let opts = opts!(name, help, labels! {label => value});
+    let g = IntGauge::with_opts(opts).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    g.set(1);
+    register(Box::new(g)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     Ok(())
 }
 
