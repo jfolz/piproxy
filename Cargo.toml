@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 async-trait="0.1"
 blake2 = "0.10.6"
-bstr = { version = "1.9.1", default-features = false }
+bstr = { version = "1.10.0", default-features = false }
 bytes = "1.6.0"
 clap = { version = "4.5.8", features = ["derive"] }
 const-hex = "1.12.0"
