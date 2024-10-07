@@ -3,7 +3,7 @@ use core::any::Any;
 use pingora::{
     cache::{
         key::CompactCacheKey, trace::SpanHandle, CacheKey, CacheMeta, HitHandler, MissHandler,
-        Storage,
+        PurgeType, Storage,
     },
     prelude::*,
 };
@@ -410,7 +410,12 @@ impl Storage for FileStorage {
         Ok(Box::new(h))
     }
 
-    async fn purge(&'static self, key: &CompactCacheKey, _trace: &SpanHandle) -> Result<bool> {
+    async fn purge(
+        &'static self,
+        key: &CompactCacheKey,
+        _purge_type: PurgeType,
+        _trace: &SpanHandle,
+    ) -> Result<bool> {
         self.purge_sync(key)
     }
 
