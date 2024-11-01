@@ -24,7 +24,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11"
 serde_yaml = "0.9"
 systemd-journal-logger = "2.1.1"
-timeout-readwrite = "0.3.3"
+timeout-readwrite = "0.4.0"
 tokio = { version = "1", features = ["rt", "fs", "time"] }
 
 [profile.profiling]
